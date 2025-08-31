@@ -30,19 +30,26 @@ rqt_graph
 ros2 run rqt_tf_tree rqt_tf_tree --force-discover
 ```
 
-# calib -> save to /root/.cache/huggingface/lerobot/calibration/robots/so101_follower/follower.json
+# calib
+```
 python3 -m lerobot.calibrate \
     --robot.type=so101_follower \
     --robot.port=/dev/ttyACM1 \
     --robot.id=follower
+# -> save to /root/.cache/huggingface/lerobot/calibration/robots/so101_follower/follower.json
+```
 
-# calib -> /root/.cache/huggingface/lerobot/calibration/teleoperators/so101_leader/leader.json  
+# calib
+```
 python3 -m lerobot.calibrate \
     --teleop.type=so101_leader \
     --teleop.port=/dev/ttyACM0 \
     --teleop.id=leader
+# -> /root/.cache/huggingface/lerobot/calibration/teleoperators/so101_leader/leader.json  
+```
 
 # teleoperate
+```
 python3 -m lerobot.teleoperate \
     --robot.type=so101_follower \
     --robot.port=/dev/ttyACM1 \
@@ -50,3 +57,4 @@ python3 -m lerobot.teleoperate \
     --teleop.type=so101_leader \
     --teleop.port=/dev/ttyACM0 \
     --teleop.id=leader
+```
