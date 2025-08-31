@@ -1,25 +1,34 @@
 
 # host setup(only once, depends on your environment)
+```
 xhost +
+```
 
 # build and run docker
+```
 docker compose up -d --build
 docker exec -it ros2_lerobot bash
+```
 
 # build ros pkg
+```
 colcon build --symlink-install
 source install/setup.bash
+```
 
 # run
+```
 ros2 launch my_robot_description view_bot.launch.py
 ros2 launch my_robot_description view_bot_gui.launch.py
 ros2 launch my_robot_description view_bot_py.launch.py
 ros2 launch my_robot_description view_bot_gui_namespace.launch.py
+```
 
 # ros viz
+```
 rqt_graph
 ros2 run rqt_tf_tree rqt_tf_tree --force-discover
-
+```
 
 # calib -> save to /root/.cache/huggingface/lerobot/calibration/robots/so101_follower/follower.json
 python3 -m lerobot.calibrate \
