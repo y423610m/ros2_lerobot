@@ -1,0 +1,30 @@
+<robot name="box_bot">
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <box size="0.5 0.3 0.2"/>
+      </geometry>
+      <material name="gray">
+        <color rgba="0.5 0.5 0.5 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.5 0.3 0.2"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="1.0"/>
+      <origin xyz="0 0 0"/>
+      <inertia ixx="0.1" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.1"/>
+    </inertial>
+  </link>
+
+  <link name="dummy_link"/>
+  <joint name="base_to_dummy" type="fixed">
+    <parent link="base_link"/>
+    <child link="dummy_link"/>
+    <origin xyz="0 0 0.1"/>
+  </joint>
+</robot>
+

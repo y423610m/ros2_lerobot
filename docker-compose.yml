@@ -1,0 +1,21 @@
+# version: '3.9'
+
+services:
+  ros2_lerobot:
+    build: .
+    container_name: ros2_lerobot
+    network_mode: "host"
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - XAUTHORITY=/root/.Xauthority
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - $XAUTHORITY:/root/.Xauthority
+      - ./my_robot_description:/ros2_lerobot_ws/src/my_robot_description:rw
+      - /dev:/dev
+    stdin_open: true
+    tty: true
+    cap_add:
+      - SYS_ADMIN
+    privileged: true
