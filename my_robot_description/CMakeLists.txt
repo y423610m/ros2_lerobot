@@ -8,6 +8,17 @@ install(
   DESTINATION share/my_robot_description/
 )
 
+install(
+  DIRECTORY config
+  DESTINATION share/${PROJECT_NAME}
+)
+
+install(
+  DIRECTORY calib
+  DESTINATION share/${PROJECT_NAME}
+)
+
+
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(urdf REQUIRED)
@@ -33,6 +44,12 @@ install(PROGRAMS
   scripts/robot_tf_node.py
   DESTINATION lib/my_robot_description
   RENAME robot_tf_node
+)
+
+install(PROGRAMS
+  scripts/so101_leader.py
+  DESTINATION lib/my_robot_description
+  RENAME so101_leader
 )
 
 ament_package()

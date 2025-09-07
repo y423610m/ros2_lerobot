@@ -1,0 +1,7 @@
+so101_leader:
+  ros__parameters:
+    type: so101_leader
+    port: /dev/ttyACM0
+    id: leader
+    use_degrees: true
+    calibration_dir: '/ros2_lerobot_ws/src/my_robot_description/calib/teleoperators/so101_leader'
