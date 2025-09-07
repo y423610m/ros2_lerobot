@@ -69,7 +69,7 @@ class SO101Leader(Node):
         action["shoulder_lift.pos"] -= 90 + 10
         action["elbow_flex.pos"] += 45 + 25
         action["wrist_flex.pos"] += 60
-        action["wrist_roll.pos"] = 0
+        action["wrist_roll.pos"] += 0
         for joint_name, calib_info in self.calib.items():
             if joint_name == 'gripper':
                 continue
