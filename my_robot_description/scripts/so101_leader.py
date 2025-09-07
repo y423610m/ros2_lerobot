@@ -9,6 +9,9 @@ import time
 import random
 import draccus
 
+import json
+import os
+
 from urdf_parser_py.urdf import URDF
 
 from lerobot.teleoperators import (  # noqa: F401
@@ -32,7 +35,7 @@ class SO101Leader(Node):
         self.declare_parameter("robot_description")
         xml_string = self.get_parameter('robot_description').get_parameter_value().string_value
         self._model = URDF.from_xml_string(xml_string)
-        
+        # import IPython; IPython.embed()
         self.declare_parameter('port')
         self.declare_parameter('id')
         self.declare_parameter('calibration_dir')
@@ -47,6 +50,10 @@ class SO101Leader(Node):
         self.teleop = make_teleoperator_from_config(cfg_teleop)
         self.teleop.connect()
 
+        calibfile = '/'.join([self.get_parameter('calibration_dir').value, f"{self.get_parameter('id').value}.json"])
+        with open(calibfile, 'r') as f:
+            self.calib = json.load(f)
+
         timer_period = 0.1  # seconds
         self.timer = self.create_timer(timer_period, self.publish_joint_states)
 
@@ -54,8 +61,20 @@ class SO101Leader(Node):
 
     def publish_joint_states(self):
         action = self.teleop.get_action()
-        action["shoulder_lift.pos"] -= 90
-        action["elbow_flex.pos"] = action["elbow_flex.pos"]+90
+
+        # self.get_logger().info(f'AAA: {self.calib=}')
+        # self.get_logger().info(f"AAA: {action=} {[joint.name for joint in self._model.joints]}")
+
+        action["shoulder_pan.pos"] += 0
+        action["shoulder_lift.pos"] -= 90 + 10
+        action["elbow_flex.pos"] += 45 + 25
+        action["wrist_flex.pos"] += 60
+        action["wrist_roll.pos"] = 0
+        for joint_name, calib_info in self.calib.items():
+            if joint_name == 'gripper':
+                continue
+            # action[joint_name+'.pos'] += calib_info.get('homing_offset', 0) * 360 / (calib_info.get('range_max', 4000)-calib_info.get('range_min', 0))
+            action[joint_name+'.pos'] += calib_info.get('homing_offset', 0) * 200 / 4800
 
         # self.get_logger().info(f'AAA: {action=}')
         # self.get_logger().info(f"AAA: {action['shoulder_pan.pos']=}")
@@ -68,7 +87,6 @@ class SO101Leader(Node):
         msg.velocity = []
         msg.effort = []
 
-        self.get_logger().info(f"AAA: {action=} {[joint.name for joint in self._model.joints]}")
 
         # for joint in self._model.joints:
             # if joint.type not in ['revolute', 'prismatic']:
