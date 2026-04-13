@@ -8,7 +8,7 @@ version = "0.1.0"
 [tasks]
 build2 = {cmd = "colcon build --symlink-install", inputs = ["src"]}
 build = "colcon build --symlink-install --packages-select lerobot_ros2_robot lerobot_ros2_teleoperator_pkg"
-run = "ros2 run lerobot_ros2_teleoperator_pkg lerobot_ros2_teleoperator_node"
+run = "ros2 run lerobot_ros2_teleoperator_pkg lerobot_ros2_teleoperator_node --config config/teleop_so101.yaml"
 
 [activation]
 scripts = ["install/setup.sh"]
@@ -34,3 +34,4 @@ numpy = ">=2.0,<2.3"
 
 [pypi-dependencies]
 lerobot = { version = ">=0.5.1, <0.6", extras = ["feetech"] }
+pyrallis = ">=0.3.1"
