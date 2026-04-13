@@ -1,3 +1,7 @@
+# ChatGPT
+https://chatgpt.com/c/69dbfacf-63c0-8324-a1d9-944e8f457985
+
+
 
 # build docker
 docker compose up -d --build
@@ -41,3 +45,23 @@ python3 -m lerobot.teleoperate \
     --teleop.type=so101_leader \
     --teleop.port=/dev/ttyACM0 \
     --teleop.id=leader
+
+
+# pixi
+```
+pixi add python==3.12
+pixi add ros-jazzy-desktop
+pixi add ros-jazzy-rviz2 \
+    ros-jazzy-rqt-graph \
+    ros-jazzy-robot-state-publisher \
+    ros-jazzy-joint-state-publisher-gui \
+    ros-jazzy-rqt-tf-tree
+pixi add ros-jazzy-turtlesim
+```
+
+# python node
+pixi run ros2 pkg create --build-type ament_python --destination-directory src --node-name lerobot_ros2_robot lerobot_ros2_robot
+
+# cpp node
+pixi run ros2 pkg create --build-type ament_cmake --destination-directory src --node-name my_cpp_node my_cpp_package
+
