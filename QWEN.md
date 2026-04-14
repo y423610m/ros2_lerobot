@@ -104,6 +104,9 @@ ros2 launch lerobot_robots_bringup so101_leader.launch.py config:=/path/to/custo
 rqt_graph
 ros2 run rqt_tf_tree rqt_tf_tree --force-discover
 rviz2
+
+# View follower robot model in RViz (SO101)
+pixi run view-follower
 ```
 
 ## Config File Format
