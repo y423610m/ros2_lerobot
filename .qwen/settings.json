@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pixi *)",
+      "Bash(mkdir *)",
+      "Bash(source *)",
+      "Bash(ros2 *)",
+      "Bash(do *)",
+      "Bash(touch *)",
+      "Bash(cp *)",
+      "Bash(done)",
+      "Bash(mv *)",
+      "Bash(git commit *)"
+    ]
+  },
+  "$version": 3
+}

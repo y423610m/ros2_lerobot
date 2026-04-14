@@ -24,7 +24,7 @@ pixi run build
 
 #### Leader (SO101 Teleoperator)
 ```bash
-pixi run run-leader
+pixi run run-so101-leader
 # Or via launch file
 ros2 launch lerobot_robots_bringup so101_leader.launch.py
 ros2 launch lerobot_robots_bringup teleoperator.launch.py config:=/path/to/custom.yaml
@@ -32,7 +32,7 @@ ros2 launch lerobot_robots_bringup teleoperator.launch.py config:=/path/to/custo
 
 #### Follower (SO101 Robot)
 ```bash
-pixi run run-follower
+pixi run run-so101-follower
 # Or via launch file
 ros2 launch lerobot_robots_bringup so101_follower.launch.py
 ros2 launch lerobot_robots_bringup robot.launch.py config:=/path/to/custom.yaml
@@ -104,4 +104,9 @@ python3 -m lerobot.teleoperate \
 rqt_graph
 ros2 run rqt_tf_tree rqt_tf_tree --force-discover
 rviz2
+```
+
+# 
+```
+~/.cache/huggingface/lerobot/calibration/teleoperators/so_leader/leader.json
 ```

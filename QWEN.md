@@ -77,11 +77,11 @@ pixi run build
 ### Run Nodes
 ```bash
 # Run leader (SO101 teleoperator)
-pixi run run-leader
+pixi run run-so101-leader
 # Equivalent to: ros2 run lerobot_robots_teleoperators lerobot_teleoperator_node --config config/teleop_so101.yaml
 
 # Run follower (SO101 robot)
-pixi run run-follower
+pixi run run-so101-follower
 # Equivalent to: ros2 run lerobot_robots_robots lerobot_robot_node --config config/robot_so101.yaml
 ```
 

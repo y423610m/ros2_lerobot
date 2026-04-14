@@ -7,22 +7,46 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
+find_package(ament_cmake_python REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclpy REQUIRED)
 
-add_executable(dummy_cpp src/dummy_cpp.cpp)
-target_include_directories(dummy_cpp PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include/${PROJECT_NAME}>)
-target_compile_features(dummy_cpp PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
-ament_target_dependencies(
-  dummy_cpp
-  "rclcpp"
-  "rclpy"
+# Install URDF files
+install(DIRECTORY urdf
+  DESTINATION share/${PROJECT_NAME})
+
+# Install launch files
+install(DIRECTORY launch
+  DESTINATION share/${PROJECT_NAME}
+  OPTIONAL)
+
+# Install config files
+install(DIRECTORY config
+  DESTINATION share/${PROJECT_NAME}
+  OPTIONAL)
+
+# Install calibration files
+install(DIRECTORY calib
+  DESTINATION share/${PROJECT_NAME}
+  OPTIONAL)
+
+# Install scripts
+install(PROGRAMS
+  scripts/camera_test.py
+  scripts/load_urdf.py
+  scripts/robot_tf_node.py
+  scripts/so101_leader.py
+  scripts/test.py
+  DESTINATION lib/${PROJECT_NAME}
 )
 
-install(TARGETS dummy_cpp
-  DESTINATION lib/${PROJECT_NAME})
+# Install scene.xml
+install(FILES scene.xml
+  DESTINATION share/${PROJECT_NAME}
+)
+
+# Install Python modules
+ament_python_install_package(${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
