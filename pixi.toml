@@ -9,6 +9,8 @@ version = "0.1.0"
 build2 = {cmd = "colcon build", inputs = ["src"]}
 build = "colcon build --packages-select lerobot_robots_robots lerobot_robots_teleoperators"
 run = "ros2 run lerobot_robots_teleoperators lerobot_teleoperator_node --config config/teleop_so101.yaml"
+run-leader = "ros2 run lerobot_robots_teleoperators lerobot_teleoperator_node --config config/teleop_so101.yaml"
+run-follower = "ros2 run lerobot_robots_robots lerobot_robot_node --config config/robot_so101.yaml"
 
 [activation]
 scripts = ["install/setup.sh"]
