@@ -13,8 +13,8 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='mujin',
-    maintainer_email='yoshito.mori@mujin.co.jp',
+    maintainer='yoshito.mori',
+    maintainer_email='y423610m@icloud.com',
     description='TODO: Package description',
     license='TODO: License declaration',
     extras_require={

@@ -4,7 +4,7 @@
   <name>lerobot_robots_teleoperators</name>
   <version>0.0.0</version>
   <description>TODO: Package description</description>
-  <maintainer email="yoshito.mori@mujin.co.jp">mujin</maintainer>
+  <maintainer email="y423610m@icloud.com">yoshito.mori</maintainer>
   <license>TODO: License declaration</license>
 
   <test_depend>ament_copyright</test_depend>

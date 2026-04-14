@@ -1,5 +1,5 @@
 [workspace]
-authors = ["yoshito.mori <yoshito.mori@mujin.co.jp>"]
+authors = ["yoshito.mori <y423610m@icloud.com>"]
 channels = ["robostack-jazzy", "conda-forge"]
 name = "ros2_lerobot"
 platforms = ["linux-64"]
