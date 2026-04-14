@@ -1,0 +1,5 @@
+type: so101_follower
+port: /dev/ttyACM1
+id: follower
+use_degrees: true
+disable_torque_on_disconnect: true

@@ -24,7 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'lerobot_ros2_robot = lerobot_robots_robots.lerobot_ros2_robot:main'
+            'lerobot_robot_node = lerobot_robots_robots.lerobot_robot_node:main'
         ],
     },
 )

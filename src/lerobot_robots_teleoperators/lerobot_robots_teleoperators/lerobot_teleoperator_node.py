@@ -6,13 +6,14 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Header
 import argparse
 import yaml
+import draccus
 
-from lerobot.teleoperators import make_teleoperator_from_config
-from lerobot.teleoperators.so_leader import SO101LeaderConfig
+from lerobot.teleoperators import make_teleoperator_from_config, TeleoperatorConfig
+from lerobot.teleoperators import so_leader  # noqa: F401 - registers SO100/SO101
 
 
 class LeRobotTeleoperatorNode(Node):
-    def __init__(self, cfg):
+    def __init__(self, cfg: TeleoperatorConfig):
         super().__init__('lerobot_teleoperator')
 
         self.teleop = make_teleoperator_from_config(cfg)
@@ -51,9 +52,9 @@ def main(args=None):
     if known_args.config:
         with open(known_args.config, 'r') as f:
             yaml_dict = yaml.safe_load(f)
-        cfg = SO101LeaderConfig(**yaml_dict)
+        cfg = draccus.decode(TeleoperatorConfig, yaml_dict)
     else:
-        cfg = SO101LeaderConfig(port='/dev/ttyACM0')
+        cfg = TeleoperatorConfig(type='so101_leader', port='/dev/ttyACM0')
 
     rclpy.init(args=args)
     node = LeRobotTeleoperatorNode(cfg)

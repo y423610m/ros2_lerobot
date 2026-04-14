@@ -1,3 +1,4 @@
+type: so100_leader
 port: /dev/ttyACM0
 id: leader
 use_degrees: true
