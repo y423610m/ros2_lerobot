@@ -7,7 +7,7 @@ ROS2 workspace for LeRobot integration, teleoperation, reinforcement learning, a
 This is a ROS2 workspace that bridges LeRobot with ROS2 ecosystems, enabling:
 - **Teleoperation** of robot arms (SO101 leader/follower, etc.)
 - **Reinforcement Learning** workflows via LeRobot
-- **Simulation** in Gazebo, Genesis, or Isaac Sim
+- **Simulation** in Gazebo, Genesis, or Isaac Sim (planned)
 
 ## Tech Stack
 
@@ -17,102 +17,76 @@ This is a ROS2 workspace that bridges LeRobot with ROS2 ecosystems, enabling:
 - **Python**: 3.12
 - **Simulators**: Gazebo, Genesis, Isaac Sim (planned)
 
+## Setup & Build
+
+This project uses [Pixi](https://pixi.sh) for dependency management and environment setup.
+
+```bash
+# Install dependencies
+pixi install
+
+# Build the workspace
+pixi run build
+```
+
+## Teleoperation (SO101)
+
+It is recommended to use the provided **pixi tasks** for running the teleoperation nodes. The nodes are namespaced to avoid topic conflicts.
+
+### 1. Run Leader (Teleoperator)
+```bash
+pixi run run-so101-leader
+```
+*Publishes to: `/leader/joint_states`*
+
+### 2. Run Follower (Robot)
+```bash
+pixi run run-so101-follower
+```
+*Subscribes to: `/follower/joint_command`*
+
+### 3. Run Leader-Follower Bridge
+This node relays the leader's joint states to the follower's joint commands.
+```bash
+pixi run run-leader-follower
+```
+
+## Visualization
+
+### View Follower in RViz
+To visualize the robot model and its current state (TFs) in RViz:
+```bash
+pixi run view-follower
+```
+*Note: In RViz, set the **Fixed Frame** to `base` and add a **RobotModel** with Description Topic `/follower/robot_description`.*
+
+### Other Tools
+```bash
+pixi run ros2 run rqt_graph rqt_graph
+pixi run ros2 run rqt_tf_tree rqt_tf_tree --force-discover
+```
+
 ## Workspace Structure
 
 ```
 ros2_lerobot/
 ├── src/
-│   ├── lerobot_robots_robots/             # Follower robot bridge (SO101, etc.)
-│   ├── lerobot_robots_teleoperators/      # Leader teleoperator bridge (SO101, etc.)
-│   ├── lerobot_robots_description/        # URDF/Xacro robot descriptions (combined)
-│   ├── lerobot_robots_control/            # ros2_control configs (combined)
-│   └── lerobot_robots_bringup/            # Launch files & runtime config (combined)
+│   ├── lerobot_robots_robots/             # Follower robot bridge
+│   ├── lerobot_robots_teleoperators/      # Leader teleoperator bridge + bridge node
+│   ├── lerobot_robots_description/        # URDF/Xacro robot descriptions
+│   ├── lerobot_robots_control/            # ros2_control configurations
+│   └── lerobot_robots_bringup/            # Launch files & runtime config
 ├── config/                                # Global config YAML files
-├── pixi.toml                              # Pixi workspace config
-├── docker-compose.yml                     # Docker environment
-└── Dockerfile
+└── pixi.toml                              # Pixi workspace config
 ```
 
-## Package Organization
+## Configuration
 
-### `lerobot_robots_description`
-- URDF/Xacro files for all robot models
-- Mesh files (STL, DAE)
-- Robot visual & collision geometry
-- TF tree definitions
-
-### `lerobot_robots_control`
-- Controller configurations (YAML)
-- Hardware interface plugins
-- Joint state publishers
-- ros2_control definitions
-
-### `lerobot_robots_bringup`
-- Launch files for real robot & simulation
-- RViz configurations
-- Node lifecycle management
-- Parameter files
-
-### `lerobot_robots_teleoperators`
-- Bridge between LeRobot leader arms and ROS2
-- `lerobot_teleoperator_node` - publishes leader joint states to `/leader/joint_states`
-- `leader_follower` - bridge node mapping `/leader/joint_states` to `/follower/joint_command`
-- Config-driven via `--config path/to/teleop_config.yaml`
-
-### `lerobot_robots_robots`
-- Bridge between LeRobot follower arms and ROS2
-- `lerobot_robot_node` - subscribes to `/follower/joint_command`, sends actions to follower. Also publishes `/follower/joint_states`.
-- Config-driven via `--config path/to/robot_config.yaml`
-
-## Common Commands
-
-### Build
-```bash
-# Full build
-pixi run build2
-
-# Selective build (robots + teleoperators)
-pixi run build
-```
-
-### Run Nodes
-```bash
-# Run leader (SO101 teleoperator)
-pixi run run-so101-leader
-# Equivalent to: ros2 run lerobot_robots_teleoperators lerobot_teleoperator_node --config config/teleop_so101.yaml --ros-args -r __ns:=/leader
-
-# Run follower (SO101 robot)
-pixi run run-so101-follower
-# Equivalent to: ros2 run lerobot_robots_robots lerobot_robot_node --config config/robot_so101.yaml --ros-args -r __ns:=/follower
-
-# Run leader-follower bridge
-pixi run run-leader-follower
-# Equivalent to: ros2 run lerobot_robots_teleoperators leader_follower
-```
-
-### Launch
-```bash
-# SO101 leader via launch file (uses default config)
-ros2 launch lerobot_robots_bringup so101_leader.launch.py
-
-# With custom config
-ros2 launch lerobot_robots_bringup so101_leader.launch.py config:=/path/to/custom.yaml
-```
-
-### Visualization
-```bash
-rqt_graph
-ros2 run rqt_tf_tree rqt_tf_tree --force-discover
-rviz2
-
-# View follower robot model in RViz (SO101)
-pixi run view-follower
-```
-
-## Config File Format
+Configuration files are located in the `config/` directory.
 
 ### Teleoperator config (`config/teleop_so101.yaml`)
 ```yaml
+type: so101_leader
 port: /dev/ttyACM0
 id: leader
 use_degrees: true
@@ -120,59 +94,19 @@ use_degrees: true
 
 ### Robot config (`config/robot_so101.yaml`)
 ```yaml
+type: so101_follower
 port: /dev/ttyACM1
 id: follower
 use_degrees: true
 disable_torque_on_disconnect: true
 ```
 
-## LeRobot Commands
-
-### Calibration
-```bash
-# Calibrate follower arm
-python3 -m lerobot.calibrate \
-    --robot.type=so101_follower \
-    --robot.port=/dev/ttyACM1 \
-    --robot.id=follower
-
-# Calibrate leader arm
-python3 -m lerobot.calibrate \
-    --teleop.type=so101_leader \
-    --teleop.port=/dev/ttyACM0 \
-    --teleop.id=leader
-```
-
-### Teleoperation
-```bash
-python3 -m lerobot.teleoperate \
-    --robot.type=so101_follower \
-    --robot.port=/dev/ttyACM1 \
-    --robot.id=follower \
-    --teleop.type=so101_leader \
-    --teleop.port=/dev/ttyACM0 \
-    --teleop.id=leader
-```
-
-## Docker
-
-```bash
-# Setup display access (host)
-xhost +
-
-# Build and start
-docker compose up -d --build
-docker exec -it ros2_lerobot bash
-```
-
 ## Development Conventions
 
-- Keep packages focused: description, control, bringup
-- Use `.launch.py` format for launch files
-- Parameter files in `config/` directory within each package
-- URDF files in `urdf/`, meshes in `meshes/`
-- Follow ROS2 REP-140 naming conventions (snake_case for packages)
-- Nodes use `--config` arg for YAML config (LeRobot-style)
+- Keep packages focused: description, control, bringup.
+- Use `.launch.py` format for launch files.
+- Use namespaces (`/leader`, `/follower`) for multi-robot setups.
+- Use Pixi tasks for common workflows.
 
 ## Future Work
 
@@ -181,4 +115,3 @@ docker exec -it ros2_lerobot bash
 - [ ] Add Isaac Sim / Omniverse support
 - [ ] RL training pipeline with LeRobot datasets
 - [ ] RViz configuration panels for teleoperation
-- [ ] Add support for more robot types (SO100, Koch, etc.)
