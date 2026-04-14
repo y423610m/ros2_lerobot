@@ -11,3 +11,8 @@ log/
 __pycache__/
 *.py[cod]
 *$py.class
+
+# AI Model Files
+QWEN.md
+GEMINI.md
+CLAUDE.md
