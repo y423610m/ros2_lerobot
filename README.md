@@ -1,55 +1,95 @@
+# ros2_lerobot
 
-# host setup(only once, depends on your environment)
-```
+ROS2 workspace for LeRobot integration, teleoperation, reinforcement learning, and simulation.
+
+## Quick Start
+
+### Docker Setup
+```bash
 xhost +
-```
-
-# build and run docker
-```
 docker compose up -d --build
 docker exec -it ros2_lerobot bash
 ```
 
-# build ros pkg
-```
-colcon build --symlink-install
-source install/setup.bash
+### Build
+```bash
+# Full build
+pixi run build2
+
+# Selective build (robots + teleoperators)
+pixi run build
 ```
 
-# run
-```
-ros2 launch my_robot_description view_bot.launch.py
-ros2 launch my_robot_description view_bot_gui.launch.py
-ros2 launch my_robot_description view_bot_py.launch.py
-ros2 launch my_robot_description view_bot_gui_namespace.launch.py
+### Run Nodes
+
+#### Leader (SO101 Teleoperator)
+```bash
+pixi run run-leader
+# Or via launch file
+ros2 launch lerobot_robots_bringup so101_leader.launch.py
+ros2 launch lerobot_robots_bringup teleoperator.launch.py config:=/path/to/custom.yaml
 ```
 
-# ros viz
-```
-rqt_graph
-ros2 run rqt_tf_tree rqt_tf_tree --force-discover
+#### Follower (SO101 Robot)
+```bash
+pixi run run-follower
+# Or via launch file
+ros2 launch lerobot_robots_bringup so101_follower.launch.py
+ros2 launch lerobot_robots_bringup robot.launch.py config:=/path/to/custom.yaml
 ```
 
-# calib
+## Workspace Structure
+
 ```
+ros2_lerobot/
+├── src/
+│   ├── lerobot_robots_robots/             # Follower robot bridge
+│   ├── lerobot_robots_teleoperators/      # Leader teleoperator bridge
+│   ├── lerobot_robots_description/        # URDF/Xacro (combined)
+│   ├── lerobot_robots_control/            # ros2_control (combined)
+│   └── lerobot_robots_bringup/            # Launch files & configs
+├── config/                                # Global config YAMLs
+└── pixi.toml
+```
+
+## Config Files
+
+### Teleoperator (`config/teleop_so101.yaml`)
+```yaml
+type: so101_leader
+port: /dev/ttyACM0
+id: leader
+use_degrees: true
+```
+
+### Robot (`config/robot_so101.yaml`)
+```yaml
+type: so101_follower
+port: /dev/ttyACM1
+id: follower
+use_degrees: true
+disable_torque_on_disconnect: true
+```
+
+## LeRobot Commands
+
+### Calibration
+```bash
+# Calibrate follower
 python3 -m lerobot.calibrate \
     --robot.type=so101_follower \
     --robot.port=/dev/ttyACM1 \
     --robot.id=follower
-# -> save to /root/.cache/huggingface/lerobot/calibration/robots/so101_follower/follower.json
-```
 
-# calib
-```
+# Calibrate leader
 python3 -m lerobot.calibrate \
     --teleop.type=so101_leader \
     --teleop.port=/dev/ttyACM0 \
     --teleop.id=leader
-# -> /root/.cache/huggingface/lerobot/calibration/teleoperators/so101_leader/leader.json  
 ```
 
-# teleoperate
-```
+### Teleoperation
+```bash
 python3 -m lerobot.teleoperate \
     --robot.type=so101_follower \
     --robot.port=/dev/ttyACM1 \
@@ -57,4 +97,11 @@ python3 -m lerobot.teleoperate \
     --teleop.type=so101_leader \
     --teleop.port=/dev/ttyACM0 \
     --teleop.id=leader
+```
+
+## Visualization
+```bash
+rqt_graph
+ros2 run rqt_tf_tree rqt_tf_tree --force-discover
+rviz2
 ```

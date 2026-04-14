@@ -13,24 +13,24 @@ def launch_setup(context, *args, **kwargs):
         config_path = os.path.join(
             get_package_share_directory('lerobot_robots_bringup'),
             'config',
-            'teleop_so101.yaml'
+            'robot_so101.yaml'
         )
 
-    teleoperator_node = Node(
-        package='lerobot_robots_teleoperators',
-        executable='lerobot_teleoperator_node',
+    robot_node = Node(
+        package='lerobot_robots_robots',
+        executable='lerobot_robot_node',
         output='screen',
         arguments=['--config', config_path],
     )
 
-    return [teleoperator_node]
+    return [robot_node]
 
 
 def generate_launch_description():
     config_arg = DeclareLaunchArgument(
         'config',
         default_value='',
-        description='Path to teleoperator config YAML'
+        description='Path to robot config YAML'
     )
 
     return LaunchDescription([
