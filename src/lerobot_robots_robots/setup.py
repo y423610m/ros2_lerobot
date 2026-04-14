@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'lerobot_ros2_robot'
+package_name = 'lerobot_robots_robots'
 
 setup(
     name=package_name,
@@ -24,7 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'lerobot_ros2_robot = lerobot_ros2_robot.lerobot_ros2_robot:main'
+            'lerobot_ros2_robot = lerobot_robots_robots.lerobot_ros2_robot:main'
         ],
     },
 )

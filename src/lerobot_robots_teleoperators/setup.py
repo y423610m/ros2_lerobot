@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'lerobot_ros2_teleoperator_pkg'
+package_name = 'lerobot_robots_teleoperators'
 
 setup(
     name=package_name,
@@ -24,7 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'lerobot_ros2_teleoperator_node = lerobot_ros2_teleoperator_pkg.lerobot_ros2_teleoperator_node:main'
+            'lerobot_teleoperator_node = lerobot_robots_teleoperators.lerobot_teleoperator_node:main'
         ],
     },
 )

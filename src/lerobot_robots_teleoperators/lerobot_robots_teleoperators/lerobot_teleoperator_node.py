@@ -11,9 +11,9 @@ from lerobot.teleoperators import make_teleoperator_from_config
 from lerobot.teleoperators.so_leader import SO101LeaderConfig
 
 
-class SO101LeaderNode(Node):
-    def __init__(self, cfg: SO101LeaderConfig):
-        super().__init__('so101_leader')
+class LeRobotTeleoperatorNode(Node):
+    def __init__(self, cfg):
+        super().__init__('lerobot_teleoperator')
 
         self.teleop = make_teleoperator_from_config(cfg)
         self.teleop.connect()
@@ -56,7 +56,7 @@ def main(args=None):
         cfg = SO101LeaderConfig(port='/dev/ttyACM0')
 
     rclpy.init(args=args)
-    node = SO101LeaderNode(cfg)
+    node = LeRobotTeleoperatorNode(cfg)
 
     try:
         rclpy.spin(node)

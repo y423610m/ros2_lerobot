@@ -1,0 +1,3 @@
+port: /dev/ttyACM0
+id: leader
+use_degrees: true
