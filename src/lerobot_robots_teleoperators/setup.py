@@ -24,7 +24,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'lerobot_teleoperator_node = lerobot_robots_teleoperators.lerobot_teleoperator_node:main'
+            'lerobot_teleoperator_node = lerobot_robots_teleoperators.lerobot_teleoperator_node:main',
+            'leader_follower = lerobot_robots_teleoperators.leader_follower:main'
         ],
     },
 )

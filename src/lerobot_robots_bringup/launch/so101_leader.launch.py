@@ -19,6 +19,8 @@ def launch_setup(context, *args, **kwargs):
     teleoperator_node = Node(
         package='lerobot_robots_teleoperators',
         executable='lerobot_teleoperator_node',
+        name='lerobot_teleoperator',
+        namespace='leader',
         output='screen',
         arguments=['--config', config_path],
     )

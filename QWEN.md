@@ -55,12 +55,13 @@ ros2_lerobot/
 
 ### `lerobot_robots_teleoperators`
 - Bridge between LeRobot leader arms and ROS2
-- `lerobot_teleoperator_node` - publishes leader joint states to `/joint_states`
+- `lerobot_teleoperator_node` - publishes leader joint states to `/leader/joint_states`
+- `leader_follower` - bridge node mapping `/leader/joint_states` to `/follower/joint_command`
 - Config-driven via `--config path/to/teleop_config.yaml`
 
 ### `lerobot_robots_robots`
 - Bridge between LeRobot follower arms and ROS2
-- `lerobot_robot_node` - subscribes to `/joint_commands`, sends actions to follower
+- `lerobot_robot_node` - subscribes to `/follower/joint_command`, sends actions to follower. Also publishes `/follower/joint_states`.
 - Config-driven via `--config path/to/robot_config.yaml`
 
 ## Common Commands
@@ -78,11 +79,15 @@ pixi run build
 ```bash
 # Run leader (SO101 teleoperator)
 pixi run run-so101-leader
-# Equivalent to: ros2 run lerobot_robots_teleoperators lerobot_teleoperator_node --config config/teleop_so101.yaml
+# Equivalent to: ros2 run lerobot_robots_teleoperators lerobot_teleoperator_node --config config/teleop_so101.yaml --ros-args -r __ns:=/leader
 
 # Run follower (SO101 robot)
 pixi run run-so101-follower
-# Equivalent to: ros2 run lerobot_robots_robots lerobot_robot_node --config config/robot_so101.yaml
+# Equivalent to: ros2 run lerobot_robots_robots lerobot_robot_node --config config/robot_so101.yaml --ros-args -r __ns:=/follower
+
+# Run leader-follower bridge
+pixi run run-leader-follower
+# Equivalent to: ros2 run lerobot_robots_teleoperators leader_follower
 ```
 
 ### Launch

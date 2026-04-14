@@ -21,7 +21,7 @@ class LeRobotTeleoperatorNode(Node):
 
         timer_period = 0.1  # seconds
         self.timer = self.create_timer(timer_period, self.publish_joint_states)
-        self.publisher_ = self.create_publisher(JointState, 'joint_commands', 10)
+        self.publisher_ = self.create_publisher(JointState, 'joint_states', 10)
 
     def publish_joint_states(self):
         action = self.teleop.get_action()

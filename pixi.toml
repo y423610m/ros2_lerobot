@@ -7,8 +7,9 @@ version = "0.1.0"
 
 [tasks]
 build = {cmd = "colcon build", inputs = ["src"]}
-run-so101-leader = "ros2 run lerobot_robots_teleoperators lerobot_teleoperator_node --config config/teleop_so101.yaml"
-run-so101-follower = "ros2 run lerobot_robots_robots lerobot_robot_node --config config/robot_so101.yaml"
+run-so101-leader = "ros2 run lerobot_robots_teleoperators lerobot_teleoperator_node --config config/teleop_so101.yaml --ros-args -r __ns:=/leader"
+run-so101-follower = "ros2 run lerobot_robots_robots lerobot_robot_node --config config/robot_so101.yaml --ros-args -r __ns:=/follower"
+run-leader-follower = "ros2 run lerobot_robots_teleoperators leader_follower"
 
 [activation]
 scripts = ["install/setup.sh"]

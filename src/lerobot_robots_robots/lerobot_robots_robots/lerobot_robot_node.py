@@ -21,10 +21,32 @@ class LeRobotRobotNode(Node):
 
         self.subscription = self.create_subscription(
             JointState,
-            'joint_commands',
+            'joint_command',
             self.command_callback,
             10
         )
+        self.publisher_ = self.create_publisher(JointState, 'joint_states', 10)
+        timer_period = 0.1  # seconds
+        self.timer = self.create_timer(timer_period, self.publish_joint_states)
+
+    def publish_joint_states(self):
+        observation = self.robot.get_observation()
+
+        msg = JointState()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.name = []
+        msg.position = []
+        msg.velocity = []
+        msg.effort = []
+
+        for key, value in observation.items():
+            if key.endswith('.pos'):
+                msg.name.append(key.replace('.pos', ''))
+                msg.position.append(value * 3.1415 / 180.0)
+                msg.velocity.append(0.0)
+                msg.effort.append(0.0)
+
+        self.publisher_.publish(msg)
 
     def command_callback(self, msg: JointState):
         action = {}

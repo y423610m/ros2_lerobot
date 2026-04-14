@@ -19,6 +19,8 @@ def launch_setup(context, *args, **kwargs):
     robot_node = Node(
         package='lerobot_robots_robots',
         executable='lerobot_robot_node',
+        name='lerobot_robot',
+        namespace='follower',
         output='screen',
         arguments=['--config', config_path],
     )
