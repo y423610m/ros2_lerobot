@@ -4,7 +4,7 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Header
-import sys
+import argparse
 import yaml
 
 from lerobot.teleoperators import make_teleoperator_from_config
@@ -44,18 +44,12 @@ class SO101LeaderNode(Node):
 
 
 def main(args=None):
-    config_path = None
-    cli_args = sys.argv[1:]
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config', type=str, help='Path to config YAML')
+    known_args, _ = parser.parse_known_args()
 
-    i = 0
-    while i < len(cli_args):
-        if cli_args[i] == '--config' and i + 1 < len(cli_args):
-            config_path = cli_args[i + 1]
-            break
-        i += 1
-
-    if config_path:
-        with open(config_path, 'r') as f:
+    if known_args.config:
+        with open(known_args.config, 'r') as f:
             yaml_dict = yaml.safe_load(f)
         cfg = SO101LeaderConfig(**yaml_dict)
     else:
