@@ -31,8 +31,7 @@ def launch_setup(context, *args, **kwargs):
         executable='rviz2',
         name='rviz2',
         output='screen',
-        # You can add a default rviz config here if you have one
-        # arguments=['-d', os.path.join(pkg_description_share, 'rviz', 'view_follower.rviz')]
+        arguments=['-d', os.path.join(pkg_description_share, 'rviz', 'view_follower.rviz')]
     )
 
     return [

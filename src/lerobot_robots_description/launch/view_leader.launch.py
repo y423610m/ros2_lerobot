@@ -17,6 +17,7 @@ def launch_setup(context, *args, **kwargs):
             package='robot_state_publisher',
             executable='robot_state_publisher',
             name='robot_state_publisher',
+            namespace='leader',
             output='screen',
             parameters=[{'robot_description': robot_description}],
         ),
@@ -24,6 +25,7 @@ def launch_setup(context, *args, **kwargs):
             package='joint_state_publisher_gui',
             executable='joint_state_publisher_gui',
             name='joint_state_publisher_gui',
+            namespace='leader',
             output='screen',
         ),
         Node(
@@ -31,6 +33,7 @@ def launch_setup(context, *args, **kwargs):
             executable='rviz2',
             name='rviz2',
             output='screen',
+            arguments=['-d', os.path.join(pkg_share, 'rviz', 'view_leader.rviz')]
         ),
     ]
 
