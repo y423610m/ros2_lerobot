@@ -1,4 +1,0 @@
-type: so100_leader
-port: /dev/ttyACM1
-id: leader
-use_degrees: true
