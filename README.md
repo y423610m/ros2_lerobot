@@ -114,4 +114,3 @@ disable_torque_on_disconnect: true
 - [ ] Add Genesis simulator integration
 - [ ] Add Isaac Sim / Omniverse support
 - [ ] RL training pipeline with LeRobot datasets
-- [ ] RViz configuration panels for teleoperation
