@@ -16,3 +16,8 @@ __pycache__/
 QWEN.md
 GEMINI.md
 CLAUDE.md
+
+# AI assistant directories
+.qwen/
+.gemini/
+.claude/
