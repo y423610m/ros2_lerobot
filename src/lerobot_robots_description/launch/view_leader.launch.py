@@ -19,7 +19,10 @@ def launch_setup(context, *args, **kwargs):
             name='robot_state_publisher',
             namespace='leader',
             output='screen',
-            parameters=[{'robot_description': robot_description}],
+            parameters=[{
+                'robot_description': robot_description,
+                'frame_prefix': 'leader/'
+            }],
         ),
         Node(
             package='joint_state_publisher_gui',

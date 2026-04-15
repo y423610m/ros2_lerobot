@@ -24,7 +24,7 @@ Visualization Manager:
     - Class: rviz_default_plugins/TF
       Enabled: true
       Name: TF
-  Fixed Frame: base
+  Fixed Frame: leader/base
   Views:
     Current:
       Class: rviz_default_plugins/Orbit

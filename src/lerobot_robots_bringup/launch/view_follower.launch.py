@@ -22,7 +22,10 @@ def launch_setup(context, *args, **kwargs):
         name='robot_state_publisher',
         namespace='follower',
         output='screen',
-        parameters=[{'robot_description': robot_description}],
+        parameters=[{
+            'robot_description': robot_description,
+            'frame_prefix': 'follower/'
+        }],
     )
 
     # Launch RViz 2
