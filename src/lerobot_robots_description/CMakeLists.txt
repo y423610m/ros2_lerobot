@@ -30,6 +30,11 @@ install(DIRECTORY calib
   DESTINATION share/${PROJECT_NAME}
   OPTIONAL)
 
+# Install rviz
+install(DIRECTORY calib
+  DESTINATION share/${PROJECT_NAME}
+  OPTIONAL)
+
 # Install scripts
 install(PROGRAMS
   scripts/camera_test.py
