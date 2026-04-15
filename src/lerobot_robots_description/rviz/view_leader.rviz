@@ -20,6 +20,7 @@ Visualization Manager:
         Value: /leader/robot_description
       Enabled: true
       Name: RobotModel
+      TF Prefix: leader
       Visual Enabled: true
     - Class: rviz_default_plugins/TF
       Enabled: true

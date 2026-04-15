@@ -20,6 +20,7 @@ Visualization Manager:
         Value: /follower/robot_description
       Enabled: true
       Name: RobotModel
+      TF Prefix: follower
       Visual Enabled: true
     - Class: rviz_default_plugins/TF
       Enabled: true
