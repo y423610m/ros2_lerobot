@@ -10,6 +10,11 @@ controller_manager:
 
 joint_trajectory_controller:
   ros__parameters:
+    allow_partial_joints_goal: true
+    interpolation_method: none          # 🔑 Disable spline interpolation
+    allow_nonzero_velocity_at_trajectory_end: true
+    state_publish_rate: 100.0
+    action_monitor_rate: 20.0
     joints:
       - shoulder_pan
       - shoulder_lift

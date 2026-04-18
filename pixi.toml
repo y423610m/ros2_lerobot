@@ -12,7 +12,7 @@ run-so101-follower = "ros2 run lerobot_robots_robots lerobot_robot_node --config
 run-leader-follower = "ros2 run lerobot_robots_teleoperators leader_follower"
 view-so101-follower = "ros2 launch lerobot_robots_bringup view_follower.launch.py"
 view-so101-leader = "ros2 launch lerobot_robots_description view_leader.launch.py"
-gazebo = "ros2 launch lerobot_robots_description gazebo.launch.py"
+run-gazebo-so101-follower = "ros2 launch lerobot_robots_bringup so101_gazebo.launch.py"
 
 [activation]
 scripts = ["install/setup.sh"]

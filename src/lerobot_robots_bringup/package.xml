@@ -11,6 +11,9 @@
 
   <depend>rclcpp</depend>
   <depend>rclpy</depend>
+  <depend>sensor_msgs</depend>
+  <depend>trajectory_msgs</depend>
+  <depend>builtin_interfaces</depend>
 
   <exec_depend>lerobot_robots_teleoperators</exec_depend>
   <exec_depend>launch_ros</exec_depend>

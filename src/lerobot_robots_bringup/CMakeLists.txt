@@ -19,6 +19,11 @@ install(DIRECTORY launch
 install(DIRECTORY config
   DESTINATION share/${PROJECT_NAME})
 
+# Install Python executables
+install(PROGRAMS
+  lerobot_robots_bringup/so101_joint_state_to_trajectory.py
+  DESTINATION lib/${PROJECT_NAME})
+
 # Install Python modules
 ament_python_install_package(${PROJECT_NAME})
 

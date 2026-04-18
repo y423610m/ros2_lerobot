@@ -81,22 +81,29 @@ def generate_launch_description():
         output='screen'
     )
 
+    so101_joint_state_to_trajectory = Node(
+        package='lerobot_robots_bringup',
+        executable='so101_joint_state_to_trajectory.py',
+        output='screen',
+    )
+
     return LaunchDescription([
         gz_resource_path,
         gazebo,
         robot_state_publisher,
         spawn_robot,
-        # bridge,
-        # RegisterEventHandler(
-        #     event_handler=OnProcessExit(
-        #         target_action=spawn_robot,
-        #         on_exit=[load_joint_state_broadcaster],
-        #     )
-        # ),
-        # RegisterEventHandler(
-        #     event_handler=OnProcessExit(
-        #         target_action=load_joint_state_broadcaster,
-        #         on_exit=[load_joint_trajectory_controller],
-        #     )
-        # ),
+        bridge,
+        so101_joint_state_to_trajectory,
+        RegisterEventHandler(
+            event_handler=OnProcessExit(
+                target_action=spawn_robot,
+                on_exit=[load_joint_state_broadcaster],
+            )
+        ),
+        RegisterEventHandler(
+            event_handler=OnProcessExit(
+                target_action=load_joint_state_broadcaster,
+                on_exit=[load_joint_trajectory_controller],
+            )
+        ),
     ])
