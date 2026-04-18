@@ -12,6 +12,7 @@ run-so101-follower = "ros2 run lerobot_robots_robots lerobot_robot_node --config
 run-leader-follower = "ros2 run lerobot_robots_teleoperators leader_follower"
 view-so101-follower = "ros2 launch lerobot_robots_bringup view_follower.launch.py"
 view-so101-leader = "ros2 launch lerobot_robots_description view_leader.launch.py"
+run-gazebo-so101-follower = "ros2 launch lerobot_robots_bringup so101_gazebo.launch.py"
 
 [activation]
 scripts = ["install/setup.sh"]
@@ -34,6 +35,12 @@ gnupg = ">=2.5.18,<3"
 evdev = ">=1.9.3,<2"
 setuptools = ">=71,<81"
 numpy = ">=2.0,<2.3"
+ros-jazzy-ros-gz = ">=1.0.19,<2"
+ros-jazzy-gz-ros2-control = ">=1.2.17,<2"
+ros-jazzy-joint-state-broadcaster = ">=4.37.0,<5"
+ros-jazzy-joint-trajectory-controller = ">=4.37.0,<5"
+ros-jazzy-ros2-control = ">=4.43.0,<5"
+ros-jazzy-controller-manager = ">=4.43.0,<5"
 
 [pypi-dependencies]
 lerobot = { version = ">=0.5.1, <0.6", extras = ["feetech"] }
