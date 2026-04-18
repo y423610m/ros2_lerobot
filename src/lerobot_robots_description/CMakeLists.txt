@@ -31,7 +31,12 @@ install(DIRECTORY calib
   OPTIONAL)
 
 # Install rviz
-install(DIRECTORY calib
+install(DIRECTORY rviz
+  DESTINATION share/${PROJECT_NAME}
+  OPTIONAL)
+
+# Install worlds
+install(DIRECTORY worlds
   DESTINATION share/${PROJECT_NAME}
   OPTIONAL)
 
