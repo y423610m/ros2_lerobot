@@ -17,6 +17,13 @@ run-gazebo-so101-follower = "ros2 launch lerobot_robots_bringup so101_gazebo.lau
 [activation]
 scripts = ["install/setup.sh"]
 
+[activation.env]
+ROS_DISTRO = "jazzy"
+GZ_IP = "127.0.0.1"
+IGN_IP = "127.0.0.1"
+QT_X11_NO_MITSHM = "1"
+
+
 [dependencies]
 python = "==3.12"
 ipython = ">=9.12.0,<10"
