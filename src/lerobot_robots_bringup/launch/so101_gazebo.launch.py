@@ -66,6 +66,7 @@ def generate_launch_description():
         executable='parameter_bridge',
         arguments=[
             '/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
+            '/camera@sensor_msgs/msg/Image[gz.msgs.Image',
         ],
         output='screen',
     )
