@@ -52,9 +52,9 @@ def generate_launch_description():
         arguments=[
             '-name', 'so101',
             '-topic', 'robot_description',
-            '-x', '0',
-            '-y', '0',
-            '-z', '0.1',
+            '-x', '-0.4',
+            '-y', '0.25',
+            '-z', '0.8',
             '--ros-args', '--log-level', 'debug'
         ],
         output='screen',
