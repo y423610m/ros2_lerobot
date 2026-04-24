@@ -1,0 +1,51 @@
+# Environment Configuration for SO101 Pick and Place
+
+# Scene settings
+env:
+  num_envs: 4096                # Number of parallel environments (GPU)
+  env_spacing: 2.0              # Spacing between environments
+  episode_length: 200            # Max steps per episode
+  device: "cuda"                # "cuda" or "cpu"
+  headless: true                # Set to false for visualization
+
+# Robot settings
+robot:
+  urdf_path: "src/lerobot_robots_description/urdf/SO101/so101_new_calib.xml"
+  robot_name: "so101_new_calib"
+  default_joint_pos: [0.0, -0.5, 1.0, 0.0, 0.0, 0.0]
+  joint_limits:
+    lower: -1.57
+    upper: 1.57
+
+# Task settings
+task:
+  table_height: 0.5
+  object_size: 0.05             # Cube size in meters
+  success_threshold: 0.05       # Distance for success
+  grasp_threshold: 0.03         # Distance to consider grasped
+
+# Object settings
+object:
+  name: "cube"
+  size: 0.05
+  mass: 0.1
+  color: [1.0, 0.0, 0.0, 1.0]  # Red
+
+# Target settings
+target:
+  color: [0.0, 1.0, 0.0, 0.3]  # Green, semi-transparent
+
+# Reward weights
+rewards:
+  reach_object: 2.0
+  grasp_object: 5.0
+  reach_target: 5.0
+  place_object: 10.0
+  action_smooth: -0.1
+  success: 20.0
+
+# Domain randomization (optional)
+domain_rand:
+  enabled: false
+  object_mass_range: [0.05, 0.2]
+  friction_range: [0.5, 1.5]

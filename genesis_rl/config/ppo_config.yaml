@@ -1,0 +1,62 @@
+# PPO Configuration for SO101 Pick and Place
+
+# Algorithm settings
+algorithm: "PPO"
+
+# Training hyperparameters
+train:
+  num_iterations: 3000          # Total training iterations
+  num_envs: 4096                # Parallel environments
+  num_steps: 24                 # Steps per environment per iteration
+  total_timesteps: "${train.num_iterations} * ${train.num_envs} * ${train.num_steps}"
+
+# PPO specific
+ppo:
+  clip_param: 0.2
+  clip_value_loss: true
+  value_loss_coef: 1.0
+  entropy_coef: 0.01
+  learning_rate: 3.0e-4
+  lr_schedule: "linear"         # "constant", "linear", "cosine"
+  max_grad_norm: 1.0
+  num_learning_epochs: 5
+  mini_batches: 4
+  gamma: 0.99
+  lam: 0.95
+  use_clipped_value_loss: true
+
+# Network architecture
+policy:
+  name: "ActorCritic"
+  activation: "elu"
+  actor_layers: [256, 256, 128]
+  critic_layers: [256, 256, 128]
+  initializer: "orthogonal"
+  init_noise_std: 1.0
+
+# Observation normalization
+obs_normalization:
+  enabled: true
+  clip_range: 5.0
+
+# Checkpointing
+checkpoint:
+  save_interval: 100            # Save every N iterations
+  keep_last_k: 5                # Keep last K checkpoints
+  export_onnx: true             # Export best model to ONNX
+  model_dir: "models/"
+
+# Logging
+logging:
+  tensorboard: true
+  log_dir: "logs/tensorboard/"
+  print_interval: 10
+  save_video: false
+  video_interval: 500
+
+# Evaluation
+eval:
+  enabled: true
+  num_episodes: 10
+  eval_interval: 100
+  record_video: false

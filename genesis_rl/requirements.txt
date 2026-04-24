@@ -1,0 +1,30 @@
+# Genesis RL Dependencies
+
+Install these packages in your Python environment for Genesis RL training:
+
+```bash
+# Install Genesis (physics engine)
+pip install "genesis-world>=0.3.0,<0.4.0"
+
+# Install Genesis Forge (RL framework) - optional, using custom env instead
+# pip install "genesis-forge>=0.3.0"
+
+# RSL-RL for PPO training (already in pixi.toml)
+# pip install "rsl-rl-lib>=5.0.0"
+
+# Verify installation
+python -c "import genesis; print('Genesis:', genesis.__version__)"
+```
+
+## Troubleshooting
+
+If you encounter dependency conflicts with moviepy/pillow:
+```bash
+pip install --no-deps genesis-world>=0.3.0
+pip install moviepy pillow numpy torch
+```
+
+Or install genesis-world with a specific compatible version:
+```bash
+pip install "genesis-world==0.3.14"
+```
