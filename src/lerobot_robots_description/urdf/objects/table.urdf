@@ -1,0 +1,132 @@
+<?xml version="1.0"?>
+<robot name="table">
+  <!-- Materials -->
+  <material name="wood">
+    <color rgba="0.4 0.2 0.15 1.0"/>
+  </material>
+
+  <!-- Tabletop -->
+  <link name="tabletop">
+    <visual>
+      <geometry>
+        <box size="1.2 0.55 0.05"/>
+      </geometry>
+      <material name="wood"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="1.2 0.55 0.05"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="10.0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.1" ixy="0.0" ixz="0.0" iyy="0.1" iyz="0.0" izz="0.1"/>
+    </inertial>
+  </link>
+
+  <!-- Leg 1 -->
+  <link name="leg1">
+    <visual>
+      <geometry>
+        <box size="0.05 0.05 0.75"/>
+      </geometry>
+      <material name="wood"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.05 0.05 0.75"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="2.0"/>
+      <origin xyz="0 0 -0.375" rpy="0 0 0"/>
+      <inertia ixx="0.001" ixy="0.0" ixz="0.0" iyy="0.001" iyz="0.0" izz="0.001"/>
+    </inertial>
+  </link>
+
+  <!-- Leg 2 -->
+  <link name="leg2">
+    <visual>
+      <geometry>
+        <box size="0.05 0.05 0.75"/>
+      </geometry>
+      <material name="wood"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.05 0.05 0.75"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="2.0"/>
+      <origin xyz="0 0 -0.375" rpy="0 0 0"/>
+      <inertia ixx="0.001" ixy="0.0" ixz="0.0" iyy="0.001" iyz="0.0" izz="0.001"/>
+    </inertial>
+  </link>
+
+  <!-- Leg 3 -->
+  <link name="leg3">
+    <visual>
+      <geometry>
+        <box size="0.05 0.05 0.75"/>
+      </geometry>
+      <material name="wood"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.05 0.05 0.75"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="2.0"/>
+      <origin xyz="0 0 -0.375" rpy="0 0 0"/>
+      <inertia ixx="0.001" ixy="0.0" ixz="0.0" iyy="0.001" iyz="0.0" izz="0.001"/>
+    </inertial>
+  </link>
+
+  <!-- Leg 4 -->
+  <link name="leg4">
+    <visual>
+      <geometry>
+        <box size="0.05 0.05 0.75"/>
+      </geometry>
+      <material name="wood"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.05 0.05 0.75"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="2.0"/>
+      <origin xyz="0 0 -0.375" rpy="0 0 0"/>
+      <inertia ixx="0.001" ixy="0.0" ixz="0.0" iyy="0.001" iyz="0.0" izz="0.001"/>
+    </inertial>
+  </link>
+
+  <!-- Joints connecting legs to tabletop -->
+  <joint name="joint_leg1" type="fixed">
+    <parent link="tabletop"/>
+    <child link="leg1"/>
+    <origin xyz="-0.6 -0.275 -0.425" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="joint_leg2" type="fixed">
+    <parent link="tabletop"/>
+    <child link="leg2"/>
+    <origin xyz="0.6 -0.275 -0.425" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="joint_leg3" type="fixed">
+    <parent link="tabletop"/>
+    <child link="leg3"/>
+    <origin xyz="-0.6 0.275 -0.425" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="joint_leg4" type="fixed">
+    <parent link="tabletop"/>
+    <child link="leg4"/>
+    <origin xyz="0.6 0.275 -0.425" rpy="0 0 0"/>
+  </joint>
+</robot>

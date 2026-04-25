@@ -43,9 +43,6 @@ class SO101PickPlaceEnv:
         self.device = torch.device(device if torch.cuda.is_available() else "cpu")
         self.headless = headless
 
-        # Robot URDF/MJCF path
-        self.robot_path = "../src/lerobot_robots_description/urdf/SO101/so101_new_calib.urdf"
-
         # Joint names (from MuJoCo XML)
         self.joint_names = [
             "shoulder_pan",
@@ -79,10 +76,14 @@ class SO101PickPlaceEnv:
         # self.scene.add_entity(ground)
 
         # Add table
-        table = options.morphs.Box(size=(1.2, 0.55, 0.05), pos=(0, 0, 0.8), fixed=True)
+        self.table_path = "../src/lerobot_robots_description/urdf/objects/table.urdf"
+        table = options.morphs.URDF(file=self.table_path, pos=(0, 0, 0.8), fixed=True)
+        # table = options.morphs.Box(size=(1.2, 0.55, 0.05), pos=(0, 0, 0.8), fixed=True)
         self.scene.add_entity(table)
 
         # Add robot (from URDF)
+        # Robot URDF/MJCF path
+        self.robot_path = "../src/lerobot_robots_description/urdf/SO101/so101_new_calib.urdf"
         robot = options.morphs.URDF(file=self.robot_path, pos=(-0.4, 0.25, 0.8), fixed=True)
         self.robot_entity = self.scene.add_entity(robot)
 
