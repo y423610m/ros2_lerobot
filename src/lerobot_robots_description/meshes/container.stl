@@ -1,0 +1,97 @@
+solid container
+  // Bottom plate (7.5 x 7.5 x 0.2 cm)
+  facet 0 0 -1
+    outer loop
+      vertex 0 0 0
+      vertex 0.075 0 0
+      vertex 0.075 0.075 0
+    endloop
+  endfacet
+  facet 0 0 -1
+    outer loop
+      vertex 0 0 0
+      vertex 0.075 0.075 0
+      vertex 0 0.075 0
+    endloop
+  endfacet
+  
+  // Front wall (y=0, 7.5cm wide, 4.9cm high, 0.2cm thick)
+  facet 0 -1 0
+    outer loop
+      vertex 0 0 0
+      vertex 0.075 0 0
+      vertex 0.075 0 0.049
+    endloop
+  endfacet
+  facet 0 -1 0
+    outer loop
+      vertex 0 0 0
+      vertex 0.075 0 0.049
+      vertex 0 0 0.049
+    endloop
+  endfacet
+  
+  // Back wall (y=7.5cm, 7.5cm wide, 4.9cm high, 0.2cm thick)
+  facet 0 1 0
+    outer loop
+      vertex 0 0.075 0.049
+      vertex 0.075 0.075 0.049
+      vertex 0.075 0.075 0
+    endloop
+  endfacet
+  facet 0 1 0
+    outer loop
+      vertex 0 0.075 0
+      vertex 0 0.075 0.049
+      vertex 0.075 0.075 0.049
+    endloop
+  endfacet
+  
+  // Left wall (x=0, 7.5cm deep, 4.9cm high, 0.2cm thick)
+  facet -1 0 0
+    outer loop
+      vertex 0 0 0
+      vertex 0 0.075 0
+      vertex 0 0.075 0.049
+    endloop
+  endfacet
+  facet -1 0 0
+    outer loop
+      vertex 0 0 0
+      vertex 0 0.075 0.049
+      vertex 0 0 0.049
+    endloop
+  endfacet
+  
+  // Right wall (x=7.5cm, 7.5cm deep, 4.9cm high, 0.2cm thick)
+  facet 1 0 0
+    outer loop
+      vertex 0.075 0.075 0.049
+      vertex 0.075 0 0.049
+      vertex 0.075 0 0
+    endloop
+  endfacet
+  facet 1 0 0
+    outer loop
+      vertex 0.075 0.075 0
+      vertex 0.075 0.075 0.049
+      vertex 0.075 0 0.049
+    endloop
+  endfacet
+  
+  // Top front edge (to close the shape)
+  facet 0 0 1
+    outer loop
+      vertex 0 0 0.049
+      vertex 0.075 0 0.049
+      vertex 0.075 0.075 0.049
+    endloop
+  endfacet
+  facet 0 0 1
+    outer loop
+      vertex 0 0 0.049
+      vertex 0.075 0.075 0.049
+      vertex 0 0.075 0.049
+    endloop
+  endfacet
+endsolid container

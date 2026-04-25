@@ -88,10 +88,8 @@ class SO101PickPlaceEnv:
         self.robot_entity = self.scene.add_entity(robot)
 
         # Add object
-        obj = options.morphs.Box(
-            size=(self.object_size,) * 3,
-            pos=(0, 0, self.table_height + self.object_size / 2)
-        )
+        self.object_path = "../src/lerobot_robots_description/urdf/objects/container.urdf"
+        obj = options.morphs.URDF(file=self.object_path, pos=(0, 0.25, 0.9))
         self.object = self.scene.add_entity(obj)
 
         # Add target
@@ -126,11 +124,11 @@ class SO101PickPlaceEnv:
         default_pos = torch.tensor([0.0, -0.5, 1.0, 0.0, 0.0, 0.0], device=self.device)
         self.robot_entity.set_dofs_position(default_pos.repeat(len(env_ids), 1), self.joint_indices, envs_idx=env_ids)
 
-        # Randomize object position
+        # Randomize container position
         obj_pos = torch.zeros(len(env_ids), 3, device=self.device)
-        obj_pos[:, 0] = torch.rand(len(env_ids), device=self.device) * 0.3 - 0.15
-        obj_pos[:, 1] = torch.rand(len(env_ids), device=self.device) * 0.3 - 0.15
-        obj_pos[:, 2] = self.table_height + self.object_size / 2
+        obj_pos[:, 0] = torch.rand(len(env_ids), device=self.device) * 0.2 - 0.5
+        obj_pos[:, 1] = torch.rand(len(env_ids), device=self.device) * 0.2 - 0.25
+        obj_pos[:, 2] = 0.83
         self.object.set_pos(obj_pos, envs_idx=env_ids)
 
         # Randomize target position
