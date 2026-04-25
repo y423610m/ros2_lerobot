@@ -95,10 +95,8 @@ class SO101PickPlaceEnv:
         self.object = self.scene.add_entity(obj)
 
         # Add target
-        target = options.morphs.Box(
-            size=(self.object_size * 1.5,) * 3,
-            pos=(0.3, 0, self.table_height + self.object_size / 2)
-        )
+        self.target_path = "../src/lerobot_robots_description/urdf/objects/pink_sponge.urdf"
+        target = options.morphs.URDF(file=self.target_path, pos=(0, 0.25, 0.9))
         self.target = self.scene.add_entity(target)
 
         # Build scene
@@ -137,9 +135,9 @@ class SO101PickPlaceEnv:
 
         # Randomize target position
         tgt_pos = torch.zeros(len(env_ids), 3, device=self.device)
-        tgt_pos[:, 0] = torch.rand(len(env_ids), device=self.device) * 0.3 - 0.15
-        tgt_pos[:, 1] = torch.rand(len(env_ids), device=self.device) * 0.3 - 0.15 + 0.3
-        tgt_pos[:, 2] = self.table_height + self.object_size / 2
+        tgt_pos[:, 0] = torch.rand(len(env_ids), device=self.device) * 0.2 - 0.5
+        tgt_pos[:, 1] = torch.rand(len(env_ids), device=self.device) * 0.3 - 0.2 
+        tgt_pos[:, 2] = 0.9
         self.target.set_pos(tgt_pos, envs_idx=env_ids)
 
         # Reset buffers

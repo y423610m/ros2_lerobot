@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<robot name="pink_sponge">
+  <!-- Materials -->
+  <material name="pink">
+    <color rgba="1.0 0.75 0.8 1.0"/>
+  </material>
+
+  <!-- Pink triangular prism sponge -->
+  <link name="sponge">
+    <visual>
+      <geometry>
+        <mesh filename="package://lerobot_robots_description/meshes/pink_sponge.stl"/>
+      </geometry>
+      <material name="pink"/>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://lerobot_robots_description/meshes/pink_sponge.stl"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.01"/> <!-- Light object -->
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.000001" ixy="0.0" ixz="0.0" iyy="0.000001" iyz="0.0" izz="0.000001"/>
+    </inertial>
+  </link>
+</robot>
