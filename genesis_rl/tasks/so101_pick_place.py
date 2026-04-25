@@ -33,9 +33,10 @@ class SO101PickPlaceEnv:
         self,
         num_envs: int = 1,
         env_spacing: float = 2.0,
-        episode_length: int = 200,
+        episode_length: int = 2000,
         device: str = "cuda",
         headless: bool = True,
+        show_viewer: bool = False,
     ):
         self.num_envs = num_envs
         self.episode_length = episode_length
@@ -43,7 +44,7 @@ class SO101PickPlaceEnv:
         self.headless = headless
 
         # Robot URDF/MJCF path
-        self.robot_path = "src/lerobot_robots_description/urdf/SO101/so101_new_calib.xml"
+        self.robot_path = "../src/lerobot_robots_description/urdf/SO101/so101_new_calib.urdf"
 
         # Joint names (from MuJoCo XML)
         self.joint_names = [
@@ -70,18 +71,19 @@ class SO101PickPlaceEnv:
         gs.init(logging_level="error")
 
         # Create scene
-        self.scene = gs.Scene()
+        self.scene = gs.Scene(show_viewer=show_viewer)
 
         # Add ground
-        ground = options.morphs.Box(size=(10, 10, 0.1), pos=(0, 0, -0.1))
-        self.scene.add_entity(ground)
+        self.scene.add_entity(gs.morphs.URDF(file="urdf/plane/plane.urdf", fixed=True))
+        # ground = options.morphs.Box(size=(10, 10, 0.1), pos=(0, 0, -0.1))
+        # self.scene.add_entity(ground)
 
         # Add table
-        table = options.morphs.Box(size=(1, 1, self.table_height), pos=(0, 0, self.table_height / 2))
+        table = options.morphs.Box(size=(1.2, 0.55, 0.05), pos=(0, 0, 0.8), fixed=True)
         self.scene.add_entity(table)
 
         # Add robot (from URDF)
-        robot = options.morphs.FileMorph(self.robot_path)
+        robot = options.morphs.URDF(file=self.robot_path, pos=(-0.4, 0.25, 0.8), fixed=True)
         self.robot_entity = self.scene.add_entity(robot)
 
         # Add object
@@ -89,26 +91,32 @@ class SO101PickPlaceEnv:
             size=(self.object_size,) * 3,
             pos=(0, 0, self.table_height + self.object_size / 2)
         )
-        self.object = self.scene.add_entity(obj, num_envs=num_envs)
+        self.object = self.scene.add_entity(obj)
 
         # Add target
         target = options.morphs.Box(
             size=(self.object_size * 1.5,) * 3,
             pos=(0.3, 0, self.table_height + self.object_size / 2)
         )
-        self.target = self.scene.add_entity(target, num_envs=num_envs)
+        self.target = self.scene.add_entity(target)
 
         # Build scene
-        self.scene.build(n_envs=num_envs, env_spacing=(env_spacing, 0, 0))
+        self.scene.build(n_envs=num_envs, env_spacing=(env_spacing, env_spacing))
 
-        # Get joint indices
-        self.joint_indices = [
-            self.robot_entity.get_joint(name).idx for name in self.joint_names
-        ]
+        # Get joint indices (DOF indices for each joint)
+        self.joint_indices = []
+        for name in self.joint_names:
+            joint = self.robot_entity.get_joint(name)
+            # For each joint, get the DOF start index
+            self.joint_indices.append(joint.dof_start)
 
         # Track progress
         self.progress_buf = torch.zeros(num_envs, device=self.device, dtype=torch.long)
         self.prev_actions = torch.zeros((num_envs, self.action_dim), device=self.device)
+
+    def get_observations(self):
+        """Get observations for RSL-RL interface."""
+        return self._compute_observations()
 
     def reset(self, env_ids: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
         """Reset environments."""
@@ -117,21 +125,21 @@ class SO101PickPlaceEnv:
 
         # Reset robot pose
         default_pos = torch.tensor([0.0, -0.5, 1.0, 0.0, 0.0, 0.0], device=self.device)
-        self.robot_entity.set_joint_positions(default_pos.repeat(len(env_ids), 1), env_ids=env_ids)
+        self.robot_entity.set_dofs_position(default_pos.repeat(len(env_ids), 1), self.joint_indices, envs_idx=env_ids)
 
         # Randomize object position
         obj_pos = torch.zeros(len(env_ids), 3, device=self.device)
         obj_pos[:, 0] = torch.rand(len(env_ids), device=self.device) * 0.3 - 0.15
         obj_pos[:, 1] = torch.rand(len(env_ids), device=self.device) * 0.3 - 0.15
         obj_pos[:, 2] = self.table_height + self.object_size / 2
-        self.object.set_pos(obj_pos, env_ids=env_ids)
+        self.object.set_pos(obj_pos, envs_idx=env_ids)
 
         # Randomize target position
         tgt_pos = torch.zeros(len(env_ids), 3, device=self.device)
         tgt_pos[:, 0] = torch.rand(len(env_ids), device=self.device) * 0.3 - 0.15
         tgt_pos[:, 1] = torch.rand(len(env_ids), device=self.device) * 0.3 - 0.15 + 0.3
         tgt_pos[:, 2] = self.table_height + self.object_size / 2
-        self.target.set_pos(tgt_pos, env_ids=env_ids)
+        self.target.set_pos(tgt_pos, envs_idx=env_ids)
 
         # Reset buffers
         self.progress_buf[env_ids] = 0
@@ -146,7 +154,7 @@ class SO101PickPlaceEnv:
         """Step the environment."""
         # Apply joint targets
         joint_targets = actions[:, :6]
-        self.robot_entity.set_joint_position_targets(joint_targets, self.joint_indices)
+        self.robot_entity.set_dofs_position(joint_targets, self.joint_indices)
 
         # Step simulation
         self.scene.step()
@@ -166,8 +174,8 @@ class SO101PickPlaceEnv:
 
     def _compute_observations(self) -> Dict[str, torch.Tensor]:
         """Compute observations."""
-        joint_pos = self.robot_entity.get_joint_positions(self.joint_indices)
-        joint_vel = self.robot_entity.get_joint_velocities(self.joint_indices)
+        joint_pos = self.robot_entity.get_dofs_position(self.joint_indices)
+        joint_vel = self.robot_entity.get_dofs_velocity(self.joint_indices)
 
         try:
             ee_link = self.robot_entity.get_link("gripper_link")
