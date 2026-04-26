@@ -87,13 +87,13 @@ class SO101PickPlaceEnv:
         robot = options.morphs.URDF(file=self.robot_path, pos=(-0.4, 0.25, 0.8), fixed=True)
         self.robot_entity = self.scene.add_entity(robot)
 
-        # Add object
-        self.object_path = "../src/lerobot_robots_description/urdf/objects/container.urdf"
+        # Add object (pink sponge to be picked up)
+        self.object_path = "../src/lerobot_robots_description/urdf/objects/pink_sponge.urdf"
         obj = options.morphs.URDF(file=self.object_path, pos=(0, 0.25, 0.9))
         self.object = self.scene.add_entity(obj)
 
-        # Add target
-        self.target_path = "../src/lerobot_robots_description/urdf/objects/pink_sponge.urdf"
+        # Add target (container to place sponge in)
+        self.target_path = "../src/lerobot_robots_description/urdf/objects/container.urdf"
         target = options.morphs.URDF(file=self.target_path, pos=(0, 0.25, 0.9))
         self.target = self.scene.add_entity(target)
 
@@ -124,36 +124,37 @@ class SO101PickPlaceEnv:
         default_pos = torch.tensor([0.0, -0.5, 1.0, 0.0, 0.0, 0.0], device=self.device)
         self.robot_entity.set_dofs_position(default_pos.repeat(len(env_ids), 1), self.joint_indices, envs_idx=env_ids)
 
-        # Randomize container position and orientation (z-axis only)
+        # Randomize sponge (object) position and orientation (z-axis only)
         obj_pos = torch.zeros(len(env_ids), 3, device=self.device)
         obj_pos[:, 0] = torch.rand(len(env_ids), device=self.device) * 0.2 - 0.5
-        obj_pos[:, 1] = torch.rand(len(env_ids), device=self.device) * 0.2 - 0.25
-        obj_pos[:, 2] = 0.83
+        obj_pos[:, 1] = torch.rand(len(env_ids), device=self.device) * 0.2 - 0.2
+        obj_pos[:, 2] = 0.9
         self.object.set_pos(obj_pos, envs_idx=env_ids)
-
-        # Randomize container orientation (z-axis rotation only)
+        
+        # Randomize sponge orientation (z-axis rotation only)
         obj_orn = torch.zeros(len(env_ids), 4, device=self.device)
-        # Random yaw angle (rotation around z-axis)
-        yaw = torch.rand(len(env_ids), device=self.device) * 2 * np.pi
-        # Convert to quaternion: [w, x, y, z] where w=cos(yaw/2), z=sin(yaw/2)
-        obj_orn[:, 0] = torch.cos(yaw / 2)  # w
-        obj_orn[:, 3] = torch.sin(yaw / 2)  # z
+        # Generate random quaternions from uniform distribution
+        # Using method: sample from normal distribution and normalize
+        obj_orn_raw = torch.randn(len(env_ids), 4, device=self.device)
+        obj_orn = obj_orn_raw / torch.norm(obj_orn_raw, dim=1, keepdim=True)
+
         # x and y remain 0 (no roll/pitch)
         self.object.set_quat(obj_orn, envs_idx=env_ids)
 
-        # Randomize target position and orientation (full 3D)
+        # Randomize target (container) position and orientation (full 3D)
         tgt_pos = torch.zeros(len(env_ids), 3, device=self.device)
         tgt_pos[:, 0] = torch.rand(len(env_ids), device=self.device) * 0.2 - 0.5
-        tgt_pos[:, 1] = torch.rand(len(env_ids), device=self.device) * 0.3 - 0.2 
-        tgt_pos[:, 2] = 0.9
+        tgt_pos[:, 1] = torch.rand(len(env_ids), device=self.device) * 0.3 - 0.25
+        tgt_pos[:, 2] = 0.83
         self.target.set_pos(tgt_pos, envs_idx=env_ids)
-
+        
         # Randomize target orientation (full 3D rotation)
         tgt_orn = torch.zeros(len(env_ids), 4, device=self.device)
-        # Generate random quaternions from uniform distribution
-        # Using method: sample from normal distribution and normalize
-        tgt_orn_raw = torch.randn(len(env_ids), 4, device=self.device)
-        tgt_orn = tgt_orn_raw / torch.norm(tgt_orn_raw, dim=1, keepdim=True)
+        # Random yaw angle (rotation around z-axis)
+        yaw = torch.rand(len(env_ids), device=self.device) * 2 * np.pi
+        # Convert to quaternion: [w, x, y, z] where w=cos(yaw/2), z=sin(yaw/2)
+        tgt_orn[:, 0] = torch.cos(yaw / 2)  # w
+        tgt_orn[:, 3] = torch.sin(yaw / 2)  # z
         self.target.set_quat(tgt_orn, envs_idx=env_ids)
 
         # Reset buffers
