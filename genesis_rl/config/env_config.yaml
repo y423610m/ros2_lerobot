@@ -4,9 +4,8 @@
 env:
   num_envs: 4096                # Number of parallel environments (GPU)
   env_spacing: 2.0              # Spacing between environments
-  episode_length: 200            # Max steps per episode
+  episode_length: 3000            # Max steps per episode
   device: "cuda"                # "cuda" or "cpu"
-  headless: true                # Set to false for visualization
 
 # Robot settings
 robot:

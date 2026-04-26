@@ -53,9 +53,7 @@ class SO101PickPlaceEnv:
         self.num_joints = len(self.joint_names)
 
         # Task parameters
-        self.table_height = 0.5
-        self.object_size = 0.05
-        self.success_threshold = 0.05
+        self.success_threshold = 0.01
         self.grasp_threshold = 0.03
 
         # Dimensions
@@ -98,6 +96,8 @@ class SO101PickPlaceEnv:
 
         # Build scene
         self.scene.build(n_envs=self.num_envs, env_spacing=(env_spacing, env_spacing))
+
+        self.joint_pos_min, self.joint_pos_max = self.robot_entity.get_dofs_limit()
 
         # Get joint indices (DOF indices for each joint)
         self.joint_indices = []
@@ -169,7 +169,7 @@ class SO101PickPlaceEnv:
         """Step the environment."""
         # Apply joint targets
         joint_targets = actions[:, :6]
-        self.robot_entity.set_dofs_position(joint_targets, self.joint_indices)
+        self.robot_entity.set_dofs_position(joint_targets * (self.joint_pos_max-self.joint_pos_min) / 2 + (self.joint_pos_max+self.joint_pos_min) / 2, self.joint_indices)
 
         # Step simulation
         self.scene.step()
@@ -189,7 +189,7 @@ class SO101PickPlaceEnv:
 
     def _compute_observations(self) -> torch.Tensor:
         """Compute observations."""
-        joint_pos = self.robot_entity.get_dofs_position(self.joint_indices)
+        joint_pos = (self.robot_entity.get_dofs_position(self.joint_indices)-(self.joint_pos_max+self.joint_pos_min)/2) / (self.joint_pos_max-self.joint_pos_min)
         joint_vel = self.robot_entity.get_dofs_velocity(self.joint_indices)
 
         ee_link = self.robot_entity.get_link("gripper")
@@ -215,7 +215,7 @@ class SO101PickPlaceEnv:
         rewards = torch.zeros(self.num_envs, device=self.device)
 
         rel_pos = obs["object_rel_pos"]
-        rewards += 2.0 * (-torch.norm(rel_pos, dim=-1))
+        rewards += 2.0 * torch.norm(rel_pos, dim=-1)
 
         dist = torch.norm(rel_pos, dim=-1)
         rewards += 5.0 * (dist < self.grasp_threshold).float()
@@ -223,12 +223,16 @@ class SO101PickPlaceEnv:
         obj_pos = obs["object_pos"]
         target_pos = obs["target_pos"]
         dist_target = torch.norm(target_pos - obj_pos, dim=-1)
-        rewards += 5.0 * (-dist_target)
+        rewards += 5.0 * (dist_target)
         rewards += 10.0 * (dist_target < self.success_threshold).float()
 
         action_diff = torch.norm(actions - self.prev_actions, dim=-1)
-        rewards += -0.1 * action_diff
+        rewards += 0.1 * action_diff
         rewards += 20.0 * (dist_target < self.success_threshold).float()
+
+        rewards += -10.0
+
+        rewards += -100000.0 * (self.episode_length_buf >= self.max_episode_length)
 
         self.prev_actions = actions.clone()
         return rewards

@@ -16,25 +16,40 @@ from tasks import SO101PickPlaceEnv
 from rsl_rl.runners import OnPolicyRunner
 
 
-def evaluate(model_path: str, num_episodes: int = 10, headless: bool = False):
+def evaluate(model_path: str, num_episodes: int = 10, show_viewer: bool = True):
     """Evaluate a trained policy."""
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # Load config
+    # Load configs
     with open("config/env_config.yaml", "r") as f:
         env_cfg = yaml.safe_load(f)
+    with open("config/ppo_config.yaml", "r") as f:
+        ppo_cfg = yaml.safe_load(f)
+
+    # Override num_envs to 1 for evaluation
+    env_cfg["env"]["num_envs"] = 1
 
     # Create environment with visualization
     env = SO101PickPlaceEnv(
-        num_envs=1,
-        env_spacing=2.0,
-        episode_length=env_cfg["env"]["episode_length"],
+        env_cfg=env_cfg,
         device=device,
-        headless=headless,
+        show_viewer=show_viewer,
     )
 
+    # import IPython
+    # IPython.embed()
+
     # Load model
-    runner = OnPolicyRunner(env, train_cfg={}, log_dir="logs/eval", device=device)
+    experiment_name = f"eval_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    log_dir = os.path.join("logs", experiment_name)
+
+    runner = OnPolicyRunner(
+        env,
+        train_cfg=ppo_cfg,
+        log_dir=log_dir,
+        device=device,
+    )
+
     runner.load(model_path)
 
     # Run evaluation episodes
@@ -50,6 +65,7 @@ def evaluate(model_path: str, num_episodes: int = 10, headless: bool = False):
         while not done:
             with torch.no_grad():
                 actions = runner.get_inference_policy()(obs)
+                print(actions)
             obs, rewards, dones, info = env.step(actions)
             episode_reward += rewards.item()
             steps += 1
@@ -74,10 +90,10 @@ def main():
     parser = argparse.ArgumentParser(description="Evaluate SO101 pick and place policy")
     parser.add_argument("--model", type=str, required=True, help="Path to model checkpoint")
     parser.add_argument("--num-episodes", type=int, default=10)
-    parser.add_argument("--headless", action="store_true", default=False)
+    parser.add_argument("--show_viewer", action="store_true", default=True)
     args = parser.parse_args()
 
-    evaluate(args.model, args.num_episodes, args.headless)
+    evaluate(args.model, args.num_episodes, args.show_viewer)
 
 
 if __name__ == "__main__":
