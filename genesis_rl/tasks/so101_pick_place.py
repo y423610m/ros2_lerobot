@@ -192,14 +192,9 @@ class SO101PickPlaceEnv:
         joint_pos = self.robot_entity.get_dofs_position(self.joint_indices)
         joint_vel = self.robot_entity.get_dofs_velocity(self.joint_indices)
 
-        try:
-            ee_link = self.robot_entity.get_link("gripper_link")
-            ee_pos = ee_link.get_pos()
-            ee_quat = ee_link.get_quat()
-        except:
-            ee_pos = joint_pos[:, -1:]
-            ee_quat = torch.zeros(self.num_envs, 4, device=self.device)
-            ee_quat[:, 0] = 1.0
+        ee_link = self.robot_entity.get_link("gripper")
+        ee_pos = ee_link.get_pos()
+        ee_quat = ee_link.get_quat()
 
         object_pos = self.object.get_pos()
         object_rel_pos = object_pos - ee_pos
