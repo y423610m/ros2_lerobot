@@ -102,7 +102,7 @@ class SO101PickPlaceEnv:
         # Add robot (from URDF)
         # Robot URDF/MJCF path
         self.robot_path = "../src/lerobot_robots_description/urdf/SO101/so101_new_calib.urdf"
-        robot = options.morphs.URDF(file=self.robot_path, pos=(-0.4, 0.25, 0.8), fixed=True, collision=True)
+        robot = options.morphs.URDF(file=self.robot_path, pos=(-0.4, 0.25, 0.8), fixed=True, collision=True, merge_fixed_links=False)
         self.robot_entity = self.scene.add_entity(robot)
 
         # Add object (pink sponge to be picked up)
@@ -135,8 +135,9 @@ class SO101PickPlaceEnv:
             import genesis as gn
             from genesis.utils.geom import trans_quat_to_T
             import numpy as np
+            self = env
             marker_frame = self.scene.draw_debug_frame(
-                trans_quat_to_T(np.array(self.robot_entit.get_link("gripper").get_pos()), np.array([1.0, 0.0, 0.0, 0.0])),
+                trans_quat_to_T(np.array(self.robot_entity.get_link("gripperframe").get_pos().tolist()[0]), np.array([1.0, 0.0, 0.0, 0.0])),
                 axis_length=0.1,   # 各軸の長さ
                 origin_size=0.01,  # 原点の球の大きさ
                 axis_radius=0.005  # 軸の太さ
@@ -228,7 +229,7 @@ class SO101PickPlaceEnv:
         
         joint_vel = self.robot_entity.get_dofs_velocity(self.joint_indices)
         
-        ee_link = self.robot_entity.get_link("gripper")
+        ee_link = self.robot_entity.get_link("gripperframe")
         ee_pos = ee_link.get_pos()
         ee_quat = ee_link.get_quat()
         

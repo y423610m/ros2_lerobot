@@ -143,7 +143,7 @@ def main():
     ee_pos_from_link = None
     ee_quat_from_link = None
     try:
-        ee_link = env.robot_entity.get_link("gripper")
+        ee_link = env.robot_entity.get_link("gripperframe")
         ee_pos_from_link = ee_link.get_pos()
         ee_quat_from_link = ee_link.get_quat()
         print("\n[Direct Link Access: gripper]")
@@ -257,7 +257,7 @@ def main():
     print_separator("SIMULATION STEP DEMONSTRATION")
 
     # Record state before
-    ee_before_raw = env.robot_entity.get_link("gripper").get_pos() if hasattr(env.robot_entity, 'get_link') and env.robot_entity.get_link("gripper") is not None else obs["ee_pos"]
+    ee_before_raw = env.robot_entity.get_link("gripperframe").get_pos() if hasattr(env.robot_entity, 'get_link') and env.robot_entity.get_link("gripperframe") is not None else obs["ee_pos"]
     obj_before = env.object.get_pos()
     # Handle tensor shapes for EE pos
     ee_before = ee_before_raw[0] if len(ee_before_raw.shape) == 2 else ee_before_raw
@@ -267,7 +267,7 @@ def main():
     zero_action = torch.zeros((args.num_envs, env.action_dim), device=device)
     obs, rewards, dones, info = env.step(zero_action)
 
-    ee_after_raw = env.robot_entity.get_link("gripper").get_pos() if hasattr(env.robot_entity, 'get_link') and env.robot_entity.get_link("gripper") is not None else obs["ee_pos"]
+    ee_after_raw = env.robot_entity.get_link("gripperframe").get_pos() if hasattr(env.robot_entity, 'get_link') and env.robot_entity.get_link("gripperframe") is not None else obs["ee_pos"]
     obj_after = env.object.get_pos()
     # Handle tensor shapes for EE pos
     ee_after = ee_after_raw[0] if len(ee_after_raw.shape) == 2 else ee_after_raw
