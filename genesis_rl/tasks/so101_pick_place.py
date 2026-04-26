@@ -65,33 +65,54 @@ class SO101PickPlaceEnv:
         gs.init(logging_level="error")
 
         # Create scene
-        self.scene = gs.Scene(show_viewer=show_viewer)
+        self.ctrl_dt = 0.005
+        self.scene = gs.Scene(
+            sim_options=gs.options.SimOptions(dt=self.ctrl_dt, substeps=2),
+            rigid_options=gs.options.RigidOptions(
+                dt=self.ctrl_dt,
+                constraint_solver=gs.constraint_solver.Newton,
+                enable_collision=True,
+                enable_joint_limit=True,
+            ),
+            # vis_options=gs.options.VisOptions(rendered_envs_idx=list(range(10))),
+            # viewer_options=gs.options.ViewerOptions(
+            #     max_FPS=int(0.5 / self.ctrl_dt),
+            #     camera_pos=(2.0, 0.0, 2.5),
+            #     camera_lookat=(0.0, 0.0, 0.5),
+            #     camera_fov=40,
+            # ),
+            # profiling_options=gs.options.ProfilingOptions(show_FPS=False),
+            # renderer=gs.options.renderers.BatchRenderer(
+            #     use_rasterizer=env_cfg["use_rasterizer"],
+            # ),
+            show_viewer=show_viewer
+        )
 
         # Add ground
-        self.scene.add_entity(gs.morphs.URDF(file="urdf/plane/plane.urdf", fixed=True))
+        self.scene.add_entity(gs.morphs.URDF(file="urdf/plane/plane.urdf", fixed=True, collision=True))
         # ground = options.morphs.Box(size=(10, 10, 0.1), pos=(0, 0, -0.1))
         # self.scene.add_entity(ground)
 
         # Add table
         self.table_path = "../src/lerobot_robots_description/urdf/objects/table.urdf"
-        table = options.morphs.URDF(file=self.table_path, pos=(0, 0, 0.8), fixed=True)
+        table = options.morphs.URDF(file=self.table_path, pos=(0, 0, 0.8), fixed=True, collision=True)
         # table = options.morphs.Box(size=(1.2, 0.55, 0.05), pos=(0, 0, 0.8), fixed=True)
         self.scene.add_entity(table)
 
         # Add robot (from URDF)
         # Robot URDF/MJCF path
         self.robot_path = "../src/lerobot_robots_description/urdf/SO101/so101_new_calib.urdf"
-        robot = options.morphs.URDF(file=self.robot_path, pos=(-0.4, 0.25, 0.8), fixed=True)
+        robot = options.morphs.URDF(file=self.robot_path, pos=(-0.4, 0.25, 0.8), fixed=True, collision=True)
         self.robot_entity = self.scene.add_entity(robot)
 
         # Add object (pink sponge to be picked up)
         self.object_path = "../src/lerobot_robots_description/urdf/objects/pink_sponge.urdf"
-        obj = options.morphs.URDF(file=self.object_path, pos=(0, 0.25, 0.9))
+        obj = options.morphs.URDF(file=self.object_path, pos=(0, 0.25, 0.9), collision=True)
         self.object = self.scene.add_entity(obj)
 
         # Add target (container to place sponge in)
         self.target_path = "../src/lerobot_robots_description/urdf/objects/container.urdf"
-        target = options.morphs.URDF(file=self.target_path, pos=(0, 0.25, 0.9))
+        target = options.morphs.URDF(file=self.target_path, pos=(0, 0.25, 0.9), collision=True)
         self.target = self.scene.add_entity(target)
 
         # Build scene
@@ -110,6 +131,20 @@ class SO101PickPlaceEnv:
         self.episode_length_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
         self.prev_actions = torch.zeros((self.num_envs, self.action_dim), device=self.device)
 
+        if 0:  # for debug
+            import genesis as gn
+            from genesis.utils.geom import trans_quat_to_T
+            import numpy as np
+            marker_frame = self.scene.draw_debug_frame(
+                trans_quat_to_T(np.array(self.robot_entit.get_link("gripper").get_pos()), np.array([1.0, 0.0, 0.0, 0.0])),
+                axis_length=0.1,   # 各軸の長さ
+                origin_size=0.01,  # 原点の球の大きさ
+                axis_radius=0.005  # 軸の太さ
+            )
+            # self.scene.add_entity(options.morphs.Box(size=(0.1, 0.1, 0.1), pos=[-0.3794, -0.0275,  1.0668]))
+            # self.scene.add_entity(options.morphs.Box(size=(0.1, 0.1, 0.1), pos=robot.get_link('gripper').get_pos()))
+
+
     def get_observations(self):
         """Get observations for RSL-RL interface."""
         return self._compute_observations()
@@ -120,31 +155,29 @@ class SO101PickPlaceEnv:
             env_ids = torch.arange(self.num_envs, device=self.device)
 
         # Reset robot pose
-        default_pos = torch.tensor([0.0, -0.5, 1.0, 0.0, 0.0, 0.0], device=self.device)
+        default_pos = torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], device=self.device)
         self.robot_entity.set_dofs_position(default_pos.repeat(len(env_ids), 1), self.joint_indices, envs_idx=env_ids)
 
         # Randomize sponge (object) position and orientation (z-axis only)
+        # Table surface is at z=0.8 + 0.025 = 0.825m
+        # Sponge height=0.017m, so center should be at z=0.825 + 0.0085 = 0.8335m
         obj_pos = torch.zeros(len(env_ids), 3, device=self.device)
         obj_pos[:, 0] = torch.rand(len(env_ids), device=self.device) * 0.2 - 0.5
         obj_pos[:, 1] = torch.rand(len(env_ids), device=self.device) * 0.2 - 0.2
-        obj_pos[:, 2] = 0.9
+        obj_pos[:, 2] = 0.835  # On table surface
         self.object.set_pos(obj_pos, envs_idx=env_ids)
         
         # Randomize sponge orientation (z-axis rotation only)
         obj_orn = torch.zeros(len(env_ids), 4, device=self.device)
-        # Generate random quaternions from uniform distribution
-        # Using method: sample from normal distribution and normalize
         obj_orn_raw = torch.randn(len(env_ids), 4, device=self.device)
         obj_orn = obj_orn_raw / torch.norm(obj_orn_raw, dim=1, keepdim=True)
-
-        # x and y remain 0 (no roll/pitch)
         self.object.set_quat(obj_orn, envs_idx=env_ids)
 
         # Randomize target (container) position and orientation (full 3D)
         tgt_pos = torch.zeros(len(env_ids), 3, device=self.device)
         tgt_pos[:, 0] = torch.rand(len(env_ids), device=self.device) * 0.2 - 0.5
         tgt_pos[:, 1] = torch.rand(len(env_ids), device=self.device) * 0.3 - 0.25
-        tgt_pos[:, 2] = 0.83
+        tgt_pos[:, 2] = 0.85  # On table surface
         self.target.set_pos(tgt_pos, envs_idx=env_ids)
         
         # Randomize target orientation (full 3D rotation)
@@ -189,17 +222,20 @@ class SO101PickPlaceEnv:
 
     def _compute_observations(self) -> torch.Tensor:
         """Compute observations."""
-        joint_pos = (self.robot_entity.get_dofs_position(self.joint_indices)-(self.joint_pos_max+self.joint_pos_min)/2) / (self.joint_pos_max-self.joint_pos_min)
+        # Normalize joint positions to [-1, 1] range
+        raw_pos = self.robot_entity.get_dofs_position(self.joint_indices)
+        joint_pos = (raw_pos - (self.joint_pos_max+self.joint_pos_min)/2) / ((self.joint_pos_max-self.joint_pos_min)/2)
+        
         joint_vel = self.robot_entity.get_dofs_velocity(self.joint_indices)
-
+        
         ee_link = self.robot_entity.get_link("gripper")
         ee_pos = ee_link.get_pos()
         ee_quat = ee_link.get_quat()
-
+        
         object_pos = self.object.get_pos()
         object_rel_pos = object_pos - ee_pos
         target_pos = self.target.get_pos()
-
+        
         return TensorDict({
             "joint_pos": joint_pos,
             "joint_vel": joint_vel,
@@ -211,28 +247,42 @@ class SO101PickPlaceEnv:
         })
 
     def _compute_rewards(self, obs: Dict, actions: torch.Tensor) -> torch.Tensor:
-        """Compute rewards."""
+        """Compute rewards for pick (sponge) and place (in container) task."""
         rewards = torch.zeros(self.num_envs, device=self.device)
 
+        # 1. Reward for moving end-effector toward sponge (object)
         rel_pos = obs["object_rel_pos"]
-        rewards += 2.0 * torch.norm(rel_pos, dim=-1)
+        dist_to_obj = torch.norm(rel_pos, dim=-1)
+        rewards += -dist_to_obj  # Negative distance = move closer
+        rewards += 10.0 * (dist_to_obj < self.grasp_threshold).float()  # Grasp bonus
 
-        dist = torch.norm(rel_pos, dim=-1)
-        rewards += 5.0 * (dist < self.grasp_threshold).float()
-
+        # 2. Reward for moving sponge toward container (target)
         obj_pos = obs["object_pos"]
         target_pos = obs["target_pos"]
-        dist_target = torch.norm(target_pos - obj_pos, dim=-1)
-        rewards += 5.0 * (dist_target)
-        rewards += 10.0 * (dist_target < self.success_threshold).float()
+        # XY distance (horizontal)
+        dist_xy = torch.norm(target_pos[:, :2] - obj_pos[:, :2], dim=-1)
+        # Z distance (vertical - sponge should be at container height)
+        container_z = target_pos[:, 2]
+        sponge_z = obj_pos[:, 2]
+        dist_z = torch.abs(sponge_z - container_z)
+        
+        # Combined distance
+        dist_target = torch.sqrt(dist_xy**2 + dist_z**2)
+        rewards += -dist_target  # Negative distance = move closer
+        
+        # 3. Success bonus if sponge is inside container
+        success = self._check_success(obs)
+        rewards += 50.0 * success.float()
 
+        # 4. Action smoothness
         action_diff = torch.norm(actions - self.prev_actions, dim=-1)
-        rewards += 0.1 * action_diff
-        rewards += 20.0 * (dist_target < self.success_threshold).float()
+        rewards += -0.01 * action_diff
 
-        rewards += -10.0
+        # 5. Small time penalty
+        rewards += -0.01
 
-        rewards += -100000.0 * (self.episode_length_buf >= self.max_episode_length)
+        # 6. Timeout penalty (small)
+        rewards += -1.0 * (self.episode_length_buf >= self.max_episode_length).float()
 
         self.prev_actions = actions.clone()
         return rewards
@@ -243,7 +293,40 @@ class SO101PickPlaceEnv:
         return timeout | success
 
     def _check_success(self, obs: Dict) -> torch.Tensor:
-        return torch.norm(obs["target_pos"] - obs["object_pos"], dim=-1) < self.success_threshold
+        """Check if sponge (object) is inside container (target).
+        
+        Container is 7.5cm x 7.5cm (0.075m x 0.075m) with 4.9cm (0.049m) height.
+        Success if sponge is within container footprint AND at correct height (inside container).
+        """
+        object_pos = obs["object_pos"]  # (num_envs, 3)
+        target_pos = obs["target_pos"]  # (num_envs, 3)
+        
+        # Container dimensions
+        container_half_size = 0.075 / 2  # 3.75cm
+        container_height = 0.049
+        wall_thickness = 0.002
+        
+        # Sponge dimensions (triangular prism)
+        sponge_height = 0.017
+        sponge_half_height = sponge_height / 2
+        
+        # XY check: sponge must be within inner dimensions of container
+        inner_half = container_half_size - wall_thickness
+        
+        x_inside = torch.abs(object_pos[:, 0] - target_pos[:, 0]) < inner_half
+        y_inside = torch.abs(object_pos[:, 1] - target_pos[:, 1]) < inner_half
+        
+        # Z check: sponge should be inside container (above bottom, below top)
+        # Container bottom: target_pos[:, 2] - container_height/2
+        # Container top: target_pos[:, 2] + container_height/2
+        sponge_bottom = object_pos[:, 2] - sponge_half_height
+        sponge_top = object_pos[:, 2] + sponge_half_height
+        container_bottom = target_pos[:, 2] - container_height / 2
+        container_top = target_pos[:, 2] + container_height / 2
+        
+        z_inside = (sponge_bottom > container_bottom) & (sponge_top < container_top)
+        
+        return (x_inside & y_inside & z_inside)
 
     def close(self):
         pass

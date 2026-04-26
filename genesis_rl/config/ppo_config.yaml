@@ -4,7 +4,7 @@
 runner_class_name: "OnPolicyRunner"
 num_steps_per_env: 24
 save_interval: 100
-empirical_normalization: None
+empirical_normalization: True
 num_iterations: 100
 seed: 42
 
@@ -34,21 +34,32 @@ policy:
 
 actor:
   class_name: MLPModel
+  hidden_dims: [256, 256, 128]
+  activation: elu
+  obs_normalization: true
   distribution_cfg:
     class_name: GaussianDistribution
     init_std: 1.0
-    std_type: scalar
+    std_type: log
+    std_range:
+    - 0.0004
+    - 1.0
 
 critic:
   class_name: MLPModel
-  distribution_cfg:
-    class_name: GaussianDistribution
-    init_std: 1.0
-    std_type: scalar
+  hidden_dims: [256, 256, 128]
+  activation: elu
+  obs_normalization: true
 
 obs_groups:
   actor: 
   - joint_pos
+  - joint_vel
+  - ee_pos
+  - ee_quat
+  - object_pos
+  - object_rel_pos
+  - target_pos
 
   critic:
   - joint_pos

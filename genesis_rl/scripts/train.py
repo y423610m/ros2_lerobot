@@ -73,8 +73,7 @@ def main():
     # Train
     print(f"Starting training for {ppo_cfg['num_iterations']} iterations...")
     runner.learn(
-        num_learning_iterations=ppo_cfg["num_iterations"],
-        init_at_random_ep_len=True,
+        num_learning_iterations=ppo_cfg["num_iterations"]
     )
 
     # Save final model

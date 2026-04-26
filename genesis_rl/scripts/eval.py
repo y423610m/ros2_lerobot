@@ -62,6 +62,9 @@ def evaluate(model_path: str, num_episodes: int = 10, show_viewer: bool = True):
         episode_reward = 0
         steps = 0
 
+        import IPython
+        IPython.embed()
+
         while not done:
             with torch.no_grad():
                 actions = runner.get_inference_policy()(obs)
