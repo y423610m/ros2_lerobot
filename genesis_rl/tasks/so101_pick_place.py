@@ -124,19 +124,37 @@ class SO101PickPlaceEnv:
         default_pos = torch.tensor([0.0, -0.5, 1.0, 0.0, 0.0, 0.0], device=self.device)
         self.robot_entity.set_dofs_position(default_pos.repeat(len(env_ids), 1), self.joint_indices, envs_idx=env_ids)
 
-        # Randomize container position
+        # Randomize container position and orientation (z-axis only)
         obj_pos = torch.zeros(len(env_ids), 3, device=self.device)
         obj_pos[:, 0] = torch.rand(len(env_ids), device=self.device) * 0.2 - 0.5
         obj_pos[:, 1] = torch.rand(len(env_ids), device=self.device) * 0.2 - 0.25
         obj_pos[:, 2] = 0.83
         self.object.set_pos(obj_pos, envs_idx=env_ids)
 
-        # Randomize target position
+        # Randomize container orientation (z-axis rotation only)
+        obj_orn = torch.zeros(len(env_ids), 4, device=self.device)
+        # Random yaw angle (rotation around z-axis)
+        yaw = torch.rand(len(env_ids), device=self.device) * 2 * np.pi
+        # Convert to quaternion: [w, x, y, z] where w=cos(yaw/2), z=sin(yaw/2)
+        obj_orn[:, 0] = torch.cos(yaw / 2)  # w
+        obj_orn[:, 3] = torch.sin(yaw / 2)  # z
+        # x and y remain 0 (no roll/pitch)
+        self.object.set_quat(obj_orn, envs_idx=env_ids)
+
+        # Randomize target position and orientation (full 3D)
         tgt_pos = torch.zeros(len(env_ids), 3, device=self.device)
         tgt_pos[:, 0] = torch.rand(len(env_ids), device=self.device) * 0.2 - 0.5
         tgt_pos[:, 1] = torch.rand(len(env_ids), device=self.device) * 0.3 - 0.2 
         tgt_pos[:, 2] = 0.9
         self.target.set_pos(tgt_pos, envs_idx=env_ids)
+
+        # Randomize target orientation (full 3D rotation)
+        tgt_orn = torch.zeros(len(env_ids), 4, device=self.device)
+        # Generate random quaternions from uniform distribution
+        # Using method: sample from normal distribution and normalize
+        tgt_orn_raw = torch.randn(len(env_ids), 4, device=self.device)
+        tgt_orn = tgt_orn_raw / torch.norm(tgt_orn_raw, dim=1, keepdim=True)
+        self.target.set_quat(tgt_orn, envs_idx=env_ids)
 
         # Reset buffers
         self.progress_buf[env_ids] = 0
