@@ -52,14 +52,8 @@ critic:
   obs_normalization: true
 
 obs_groups:
-  actor: 
+  actor:
   - joint_pos
-  - joint_vel
-  - ee_pos
-  - ee_quat
-  - object_pos
-  - object_rel_pos
-  - target_pos
 
   critic:
   - joint_pos

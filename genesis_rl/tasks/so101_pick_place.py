@@ -65,7 +65,7 @@ class SO101PickPlaceEnv:
         gs.init(logging_level="error")
 
         # Create scene
-        self.ctrl_dt = 0.005
+        self.ctrl_dt = 0.01
         self.scene = gs.Scene(
             sim_options=gs.options.SimOptions(dt=self.ctrl_dt, substeps=2),
             rigid_options=gs.options.RigidOptions(
@@ -163,28 +163,28 @@ class SO101PickPlaceEnv:
         # Table surface is at z=0.8 + 0.025 = 0.825m
         # Sponge height=0.017m, so center should be at z=0.825 + 0.0085 = 0.8335m
         obj_pos = torch.zeros(len(env_ids), 3, device=self.device)
-        obj_pos[:, 0] = torch.rand(len(env_ids), device=self.device) * 0.2 - 0.5
-        obj_pos[:, 1] = torch.rand(len(env_ids), device=self.device) * 0.2 - 0.2
+        obj_pos[:, 0] = torch.rand(len(env_ids), device=self.device) * 0.2 * 0.0 - 0.4
+        obj_pos[:, 1] = torch.rand(len(env_ids), device=self.device) * 0.2 * 0.0 - 0.1
         obj_pos[:, 2] = 0.835  # On table surface
         self.object.set_pos(obj_pos, envs_idx=env_ids)
         
         # Randomize sponge orientation (z-axis rotation only)
         obj_orn = torch.zeros(len(env_ids), 4, device=self.device)
-        obj_orn_raw = torch.randn(len(env_ids), 4, device=self.device)
+        obj_orn_raw = torch.randn(len(env_ids), 4, device=self.device) * 0.0
         obj_orn = obj_orn_raw / torch.norm(obj_orn_raw, dim=1, keepdim=True)
         self.object.set_quat(obj_orn, envs_idx=env_ids)
 
         # Randomize target (container) position and orientation (full 3D)
         tgt_pos = torch.zeros(len(env_ids), 3, device=self.device)
-        tgt_pos[:, 0] = torch.rand(len(env_ids), device=self.device) * 0.2 - 0.5
-        tgt_pos[:, 1] = torch.rand(len(env_ids), device=self.device) * 0.3 - 0.25
+        tgt_pos[:, 0] = torch.rand(len(env_ids), device=self.device) * 0.2 * 0.0 - 0.4
+        tgt_pos[:, 1] = torch.rand(len(env_ids), device=self.device) * 0.3 * 0.0 - 0.2
         tgt_pos[:, 2] = 0.85  # On table surface
         self.target.set_pos(tgt_pos, envs_idx=env_ids)
         
         # Randomize target orientation (full 3D rotation)
         tgt_orn = torch.zeros(len(env_ids), 4, device=self.device)
         # Random yaw angle (rotation around z-axis)
-        yaw = torch.rand(len(env_ids), device=self.device) * 2 * np.pi
+        yaw = torch.rand(len(env_ids), device=self.device) * 2 * np.pi * 0.0
         # Convert to quaternion: [w, x, y, z] where w=cos(yaw/2), z=sin(yaw/2)
         tgt_orn[:, 0] = torch.cos(yaw / 2)  # w
         tgt_orn[:, 3] = torch.sin(yaw / 2)  # z
@@ -203,7 +203,10 @@ class SO101PickPlaceEnv:
         """Step the environment."""
         # Apply joint targets
         joint_targets = actions[:, :6]
-        self.robot_entity.set_dofs_position(joint_targets * (self.joint_pos_max-self.joint_pos_min) / 2 + (self.joint_pos_max+self.joint_pos_min) / 2, self.joint_indices)
+        next_joint_targets = joint_targets * (self.joint_pos_max-self.joint_pos_min) / 2 + (self.joint_pos_max+self.joint_pos_min) / 2
+        current_joint_pos = self.robot_entity.get_dofs_position(self.joint_indices)
+        clamped_next_joint_targets = torch.clamp(next_joint_targets, current_joint_pos-0.02, current_joint_pos+0.02)
+        self.robot_entity.set_dofs_position(clamped_next_joint_targets, self.joint_indices)
 
         # Step simulation
         self.scene.step()
@@ -268,8 +271,9 @@ class SO101PickPlaceEnv:
         dist_z = torch.abs(sponge_z - container_z)
         
         # Combined distance
-        dist_target = torch.sqrt(dist_xy**2 + dist_z**2)
-        rewards += -dist_target  # Negative distance = move closer
+        # dist_target = torch.sqrt(dist_xy**2 + dist_z**2)
+        # rewards += -15.0 * dist_target  # Negative distance = move closer
+        rewards += -15.0 * dist_xy  # Negative distance = move closer
         
         # 3. Success bonus if sponge is inside container
         success = self._check_success(obs)
@@ -280,10 +284,10 @@ class SO101PickPlaceEnv:
         rewards += -0.01 * action_diff
 
         # 5. Small time penalty
-        rewards += -0.01
+        rewards += -1
 
         # 6. Timeout penalty (small)
-        rewards += -1.0 * (self.episode_length_buf >= self.max_episode_length).float()
+        rewards += -10.0 * (self.episode_length_buf >= self.max_episode_length).float()
 
         self.prev_actions = actions.clone()
         return rewards

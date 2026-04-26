@@ -68,7 +68,7 @@ def evaluate(model_path: str, num_episodes: int = 10, show_viewer: bool = True):
         while not done:
             with torch.no_grad():
                 actions = runner.get_inference_policy()(obs)
-                print(actions)
+                # print(f"{actions=}")
             obs, rewards, dones, info = env.step(actions)
             episode_reward += rewards.item()
             steps += 1
