@@ -8,7 +8,7 @@ import torch
 import genesis as gs
 from genesis import options
 from typing import Dict, Optional, Tuple
-
+from tensordict import TensorDict
 
 class SO101PickPlaceEnv:
     """
@@ -31,17 +31,15 @@ class SO101PickPlaceEnv:
 
     def __init__(
         self,
-        num_envs: int = 1,
-        env_spacing: float = 2.0,
-        episode_length: int = 2000,
+        env_cfg: Dict,
         device: str = "cuda",
-        headless: bool = True,
         show_viewer: bool = False,
     ):
-        self.num_envs = num_envs
-        self.episode_length = episode_length
+        self.cfg = env_cfg
+        self.num_envs = env_cfg["env"].get("num_envs", 1)
+        self.max_episode_length = env_cfg["env"].get("episode_length", 3000)
         self.device = torch.device(device if torch.cuda.is_available() else "cpu")
-        self.headless = headless
+        env_spacing=env_cfg["env"].get("env_spacing", 2.0)
 
         # Joint names (from MuJoCo XML)
         self.joint_names = [
@@ -63,6 +61,7 @@ class SO101PickPlaceEnv:
         # Dimensions
         self.obs_dim = 28
         self.action_dim = 6
+        self.num_actions = 6
 
         # Initialize Genesis
         gs.init(logging_level="error")
@@ -98,7 +97,7 @@ class SO101PickPlaceEnv:
         self.target = self.scene.add_entity(target)
 
         # Build scene
-        self.scene.build(n_envs=num_envs, env_spacing=(env_spacing, env_spacing))
+        self.scene.build(n_envs=self.num_envs, env_spacing=(env_spacing, env_spacing))
 
         # Get joint indices (DOF indices for each joint)
         self.joint_indices = []
@@ -108,8 +107,8 @@ class SO101PickPlaceEnv:
             self.joint_indices.append(joint.dof_start)
 
         # Track progress
-        self.progress_buf = torch.zeros(num_envs, device=self.device, dtype=torch.long)
-        self.prev_actions = torch.zeros((num_envs, self.action_dim), device=self.device)
+        self.episode_length_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
+        self.prev_actions = torch.zeros((self.num_envs, self.action_dim), device=self.device)
 
     def get_observations(self):
         """Get observations for RSL-RL interface."""
@@ -158,7 +157,7 @@ class SO101PickPlaceEnv:
         self.target.set_quat(tgt_orn, envs_idx=env_ids)
 
         # Reset buffers
-        self.progress_buf[env_ids] = 0
+        self.episode_length_buf[env_ids] = 0
         self.prev_actions[env_ids] = 0.0
 
         # Step to stabilize
@@ -174,7 +173,7 @@ class SO101PickPlaceEnv:
 
         # Step simulation
         self.scene.step()
-        self.progress_buf += 1
+        self.episode_length_buf += 1
 
         # Compute
         obs = self._compute_observations()
@@ -188,7 +187,7 @@ class SO101PickPlaceEnv:
         info = {"success": self._check_success(obs)}
         return obs, rewards, dones, info
 
-    def _compute_observations(self) -> Dict[str, torch.Tensor]:
+    def _compute_observations(self) -> torch.Tensor:
         """Compute observations."""
         joint_pos = self.robot_entity.get_dofs_position(self.joint_indices)
         joint_vel = self.robot_entity.get_dofs_velocity(self.joint_indices)
@@ -206,7 +205,7 @@ class SO101PickPlaceEnv:
         object_rel_pos = object_pos - ee_pos
         target_pos = self.target.get_pos()
 
-        return {
+        return TensorDict({
             "joint_pos": joint_pos,
             "joint_vel": joint_vel,
             "ee_pos": ee_pos,
@@ -214,7 +213,7 @@ class SO101PickPlaceEnv:
             "object_pos": object_pos,
             "object_rel_pos": object_rel_pos,
             "target_pos": target_pos,
-        }
+        })
 
     def _compute_rewards(self, obs: Dict, actions: torch.Tensor) -> torch.Tensor:
         """Compute rewards."""
@@ -240,7 +239,7 @@ class SO101PickPlaceEnv:
         return rewards
 
     def _compute_terminations(self, obs: Dict) -> torch.Tensor:
-        timeout = self.progress_buf >= self.episode_length
+        timeout = self.episode_length_buf >= self.max_episode_length
         success = self._check_success(obs)
         return timeout | success
 

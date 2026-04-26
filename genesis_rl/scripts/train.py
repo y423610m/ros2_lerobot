@@ -36,7 +36,7 @@ def main():
     if args.num_envs is not None:
         env_cfg["env"]["num_envs"] = args.num_envs
     if args.num_iterations is not None:
-        ppo_cfg["train"]["num_iterations"] = args.num_iterations
+        ppo_cfg["num_iterations"] = args.num_iterations
 
     # Set device
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -45,11 +45,8 @@ def main():
     # Create environment
     print("Creating environment...")
     env = SO101PickPlaceEnv(
-        num_envs=env_cfg["env"]["num_envs"],
-        env_spacing=env_cfg["env"]["env_spacing"],
-        episode_length=env_cfg["env"]["episode_length"],
-        device=device,
-        headless=args.headless,
+        env_cfg=env_cfg,
+        device=device
     )
 
     # Get observation and action dimensions
@@ -63,7 +60,7 @@ def main():
 
     runner = OnPolicyRunner(
         env,
-        train_cfg=ppo_cfg["train"],
+        train_cfg=ppo_cfg,
         log_dir=log_dir,
         device=device,
     )
@@ -74,9 +71,9 @@ def main():
         runner.load(args.resume)
 
     # Train
-    print(f"Starting training for {ppo_cfg['train']['num_iterations']} iterations...")
+    print(f"Starting training for {ppo_cfg['num_iterations']} iterations...")
     runner.learn(
-        num_learning_iterations=ppo_cfg["train"]["num_iterations"],
+        num_learning_iterations=ppo_cfg["num_iterations"],
         init_at_random_ep_len=True,
     )
 

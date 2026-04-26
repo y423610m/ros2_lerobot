@@ -1,14 +1,74 @@
 # PPO Configuration for SO101 Pick and Place
 
-# Algorithm settings
-algorithm: "PPO"
-
 # Training hyperparameters
-train:
-  num_iterations: 3000          # Total training iterations
-  num_envs: 4096                # Parallel environments
-  num_steps: 24                 # Steps per environment per iteration
-  total_timesteps: "${train.num_iterations} * ${train.num_envs} * ${train.num_steps}"
+runner_class_name: "OnPolicyRunner"
+num_steps_per_env: 24
+save_interval: 100
+empirical_normalization: None
+num_iterations: 100
+seed: 42
+
+algorithm:
+  class_name: "PPO"
+  clip_param: 0.2
+  desired_kl: 0.01
+  entropy_coef: 0.0
+  gamma: 0.99
+  lam: 0.95
+  learning_rate: 0.0003
+  max_grad_norm: 1.0
+  num_learning_epochs: 5
+  num_mini_batches: 4
+  schedule: "adaptive"
+  use_clipped_value_loss: True
+  value_loss_coef: 1.0
+
+# Network architecture
+policy:
+  name: "ActorCritic"
+  activation: "elu"
+  actor_layers: [256, 256, 128]
+  critic_layers: [256, 256, 128]
+  initializer: "orthogonal"
+  init_noise_std: 1.0
+
+actor:
+  class_name: MLPModel
+  distribution_cfg:
+    class_name: GaussianDistribution
+    init_std: 1.0
+    std_type: scalar
+
+critic:
+  class_name: MLPModel
+  distribution_cfg:
+    class_name: GaussianDistribution
+    init_std: 1.0
+    std_type: scalar
+
+obs_groups:
+  actor: 
+  - joint_pos
+
+  critic:
+  - joint_pos
+  - joint_vel
+  - ee_pos
+  - ee_quat
+  - object_pos
+  - object_rel_pos
+  - target_pos
+
+runner:
+  checkpoint: -1
+  experiment_name: exp_name
+  load_run: -1
+  log_interval: 1
+  max_iterations: max_iterations
+  record_interval: -1
+  resume: False
+  resume_path: None
+  run_name: ""
 
 # PPO specific
 ppo:
@@ -25,15 +85,6 @@ ppo:
   lam: 0.95
   use_clipped_value_loss: true
 
-# Network architecture
-policy:
-  name: "ActorCritic"
-  activation: "elu"
-  actor_layers: [256, 256, 128]
-  critic_layers: [256, 256, 128]
-  initializer: "orthogonal"
-  init_noise_std: 1.0
-
 # Observation normalization
 obs_normalization:
   enabled: true
@@ -43,7 +94,7 @@ obs_normalization:
 checkpoint:
   save_interval: 100            # Save every N iterations
   keep_last_k: 5                # Keep last K checkpoints
-  export_onnx: true             # Export best model to ONNX
+  export_onnx: false            # Export best model to ONNX. TODO fix
   model_dir: "models/"
 
 # Logging
