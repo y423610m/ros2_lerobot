@@ -254,40 +254,62 @@ class SO101PickPlaceEnv:
         """Compute rewards for pick (sponge) and place (in container) task."""
         rewards = torch.zeros(self.num_envs, device=self.device)
 
-        # 1. Reward for moving end-effector toward sponge (object)
-        rel_pos = obs["object_rel_pos"]
+        # Get states
+        rel_pos = obs["object_rel_pos"]  # EE to sponge
         dist_to_obj = torch.norm(rel_pos, dim=-1)
-        rewards += -dist_to_obj  # Negative distance = move closer
-        rewards += 10.0 * (dist_to_obj < self.grasp_threshold).float()  # Grasp bonus
-
-        # 2. Reward for moving sponge toward container (target)
         obj_pos = obs["object_pos"]
         target_pos = obs["target_pos"]
-        # XY distance (horizontal)
-        dist_xy = torch.norm(target_pos[:, :2] - obj_pos[:, :2], dim=-1)
-        # Z distance (vertical - sponge should be at container height)
-        container_z = target_pos[:, 2]
-        sponge_z = obj_pos[:, 2]
-        dist_z = torch.abs(sponge_z - container_z)
+        ee_pos = obs["ee_pos"]  # Already 3D from gripperframe
         
-        # Combined distance
-        # dist_target = torch.sqrt(dist_xy**2 + dist_z**2)
-        # rewards += -15.0 * dist_target  # Negative distance = move closer
-        rewards += -15.0 * dist_xy  # Negative distance = move closer
+        # Gripper state (action[5]: +1 = open, -1 = closed)
+        gripper_closed = obs["joint_pos"][:, 5] < 0.0  # True if closing/closed
         
-        # 3. Success bonus if sponge is inside container
-        success = self._check_success(obs)
-        rewards += 50.0 * success.float()
+        # Object height above table
+        object_height = obj_pos[:, 2] - 0.84  # Table surface ~0.84
+        object_lifted = object_height > 0.02  # 2cm above table = grasped
 
-        # 4. Action smoothness
+        # === PHASE 1: APPROACH + GRASP ===
+        # Reward for moving toward sponge
+        rewards += -dist_to_obj  # Move closer to sponge
+        
+        # Bonus for being close enough to grasp
+        near_sponge = dist_to_obj < self.grasp_threshold
+        rewards += 10.0 * near_sponge.float()
+
+        # CRITICAL: Reward for closing gripper when near sponge
+        # This teaches the robot to actually grasp!
+        rewards += 20.0 * near_sponge.float() * gripper_closed.float()
+
+        # Reward for lifting the sponge (verifies successful grasp)
+        rewards += 50.0 * object_lifted.float()
+        
+        # === PHASE 2: TRANSPORT + PLACE ===
+        # Only reward placing if sponge is lifted (grasped)
+        lifted_mask = object_lifted.float()
+        
+        # Distance from sponge to container (XY only for placement)
+        dist_xy = torch.norm(target_pos[:, :2] - obj_pos[:, :2], dim=-1)
+        rewards += -10.0 * dist_xy * lifted_mask  # Move grasped sponge toward container
+        
+        # Z distance (sponge should be at container height)
+        container_z = target_pos[:, 2]
+        dist_z = torch.abs(obj_pos[:, 2] - container_z)
+        rewards += -5.0 * dist_z * lifted_mask
+        
+        # Success bonus if sponge is inside container
+        success = self._check_success(obs)
+        rewards += 100.0 * success.float()
+        
+        # === REGULARIZATION ===
+        # Action smoothness
         action_diff = torch.norm(actions - self.prev_actions, dim=-1)
         rewards += -0.01 * action_diff
 
-        # 5. Small time penalty
-        rewards += -1
+        # Small time penalty
+        rewards += -0.1
 
-        # 6. Timeout penalty (small)
-        rewards += -10.0 * (self.episode_length_buf >= self.max_episode_length).float()
+        # Timeout penalty
+        rewards += -5.0 * (self.episode_length_buf >= self.max_episode_length).float()
 
         self.prev_actions = actions.clone()
         return rewards
