@@ -54,6 +54,9 @@ critic:
 obs_groups:
   actor:
   - joint_pos
+  - object_pos
+  - target_pos
+
 
   critic:
   - joint_pos

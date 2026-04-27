@@ -54,7 +54,8 @@ class SO101PickPlaceEnv:
 
         # Task parameters
         self.success_threshold = 0.01
-        self.grasp_threshold = 0.03
+        self.grasp_threshold = 0.01
+        self.table_surface_z = 0.835  # Object placed at this height on table
 
         # Dimensions
         self.obs_dim = 28
@@ -129,6 +130,7 @@ class SO101PickPlaceEnv:
 
         # Track progress
         self.episode_length_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
+        self.init_target_positions = torch.zeros((self.num_envs, 3), device=self.device)
         self.prev_actions = torch.zeros((self.num_envs, self.action_dim), device=self.device)
 
         if 0:  # for debug
@@ -155,7 +157,7 @@ class SO101PickPlaceEnv:
         if env_ids is None:
             env_ids = torch.arange(self.num_envs, device=self.device)
 
-        # Reset robot pose
+        # Reset robot pose. All 0 is good pose.
         default_pos = torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], device=self.device)
         self.robot_entity.set_dofs_position(default_pos.repeat(len(env_ids), 1), self.joint_indices, envs_idx=env_ids)
 
@@ -180,6 +182,7 @@ class SO101PickPlaceEnv:
         tgt_pos[:, 1] = torch.rand(len(env_ids), device=self.device) * 0.3 * 0.0 - 0.2
         tgt_pos[:, 2] = 0.85  # On table surface
         self.target.set_pos(tgt_pos, envs_idx=env_ids)
+        self.init_target_positions[env_ids] = tgt_pos
         
         # Randomize target orientation (full 3D rotation)
         tgt_orn = torch.zeros(len(env_ids), 4, device=self.device)
@@ -262,26 +265,27 @@ class SO101PickPlaceEnv:
         ee_pos = obs["ee_pos"]  # Already 3D from gripperframe
         
         # Gripper state (action[5]: +1 = open, -1 = closed)
-        gripper_closed = obs["joint_pos"][:, 5] < 0.0  # True if closing/closed
+        # Use -0.7 threshold to ensure gripper is sufficiently closed for grasping
+        gripper_closed = obs["joint_pos"][:, 5] < -0.7  # True if sufficiently closed
         
         # Object height above table
-        object_height = obj_pos[:, 2] - 0.84  # Table surface ~0.84
-        object_lifted = object_height > 0.02  # 2cm above table = grasped
+        object_height = obj_pos[:, 2] - self.table_surface_z  # Table surface where object is placed
+        object_lifted = (0.05 < object_height) & (object_height < 0.15) # 2cm above table = grasped
 
         # === PHASE 1: APPROACH + GRASP ===
         # Reward for moving toward sponge
-        rewards += -dist_to_obj  # Move closer to sponge
-        
+        rewards += -10.0 * dist_to_obj  # Move closer to sponge
+
         # Bonus for being close enough to grasp
         near_sponge = dist_to_obj < self.grasp_threshold
-        rewards += 10.0 * near_sponge.float()
+        # rewards += 10.0 * near_sponge.float()
 
         # CRITICAL: Reward for closing gripper when near sponge
         # This teaches the robot to actually grasp!
-        rewards += 20.0 * near_sponge.float() * gripper_closed.float()
+        # rewards += 10.0 * near_sponge.float() * gripper_closed.float()
 
         # Reward for lifting the sponge (verifies successful grasp)
-        rewards += 50.0 * object_lifted.float()
+        rewards += 100.0 * object_lifted.float()
         
         # === PHASE 2: TRANSPORT + PLACE ===
         # Only reward placing if sponge is lifted (grasped)
@@ -299,6 +303,14 @@ class SO101PickPlaceEnv:
         # Success bonus if sponge is inside container
         success = self._check_success(obs)
         rewards += 100.0 * success.float()
+
+        # Penalties
+        ## cannot continue 
+        uncontinuable = (obs["object_pos"][:, 2] < 0.7) | (obs["target_pos"][:, 2] < 0.7)
+        rewards += -1000.0 * uncontinuable
+
+        ## Do not move container too much.
+        rewards += -10.0 * torch.norm(self.init_target_positions-obs["target_pos"], dim=-1)
         
         # === REGULARIZATION ===
         # Action smoothness
@@ -316,8 +328,9 @@ class SO101PickPlaceEnv:
 
     def _compute_terminations(self, obs: Dict) -> torch.Tensor:
         timeout = self.episode_length_buf >= self.max_episode_length
+        uncontinuable = (obs["object_pos"][:, 2] < 0.7) | (obs["target_pos"][:, 2] < 0.7)
         success = self._check_success(obs)
-        return timeout | success
+        return timeout | uncontinuable | success
 
     def _check_success(self, obs: Dict) -> torch.Tensor:
         """Check if sponge (object) is inside container (target).
