@@ -39,7 +39,7 @@ actor:
   obs_normalization: true
   distribution_cfg:
     class_name: GaussianDistribution
-    init_std: 0.2
+    init_std: 0.1
     std_type: log
     std_range:
     - 0.0004
@@ -62,7 +62,6 @@ obs_groups:
   - joint_pos
   - joint_vel
   - ee_pos
-  - ee_quat
   - object_pos
   - object_rel_pos
   - target_pos

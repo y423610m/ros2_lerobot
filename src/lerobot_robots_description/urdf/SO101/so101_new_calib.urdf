@@ -298,6 +298,39 @@
       </geometry>
     </collision>
   </link>
+
+  <!-- EE wrist -->
+  <link name="ee_wrist">
+    <origin xyz="0 0 0" rpy="0 -0 0"/>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="1e-9"/>
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+    </inertial>
+  </link>
+  <joint name="ee_wrist_frame" type="fixed">
+    <origin xyz="0.012 -0.145 0.018" rpy="1.5708 1.22465e-16 1.5708"/>
+    <parent link="wrist"/>
+    <child link="ee_wrist"/>
+    <axis xyz="0 0 0"/>
+  </joint>
+
+  <!-- EE gripper -->
+  <link name="ee_gripper">
+    <origin xyz="0 0 0" rpy="0 -0 0"/>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="1e-9"/>
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+    </inertial>
+  </link>
+  <joint name="ee_gripper_frame" type="fixed">
+    <origin xyz="-0.005 -0.061 0.02" rpy="1.5708 1.22465e-16 1.5708"/>
+    <parent link="moving_jaw_so101_v1"/>
+    <child link="ee_gripper"/>
+    <axis xyz="0 0 0"/>
+  </joint>
+
   <!-- Frame gripperframe (dummy link + fixed joint) -->
   <link name="gripperframe">
     <origin xyz="0 0 0" rpy="0 -0 0"/>

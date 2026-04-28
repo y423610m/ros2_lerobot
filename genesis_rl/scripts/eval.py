@@ -70,6 +70,13 @@ def evaluate(model_path: str, num_episodes: int = 10, show_viewer: bool = True):
                 actions = runner.get_inference_policy()(obs)
                 # print(f"{actions=}")
             obs, rewards, dones, info = env.step(actions)
+            print("====================================")
+            print(f"{torch.norm(obs['object_rel_pos'], dim=-1)=}")
+            print(f"{actions=}")
+            print(f"{obs['joint_pos']=}")
+            print(f"{rewards=}")
+            print(f"{dones=}")
+            print(f"{info=}")
             episode_reward += rewards.item()
             steps += 1
 

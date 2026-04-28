@@ -9,6 +9,7 @@ import genesis as gs
 from genesis import options
 from typing import Dict, Optional, Tuple
 from tensordict import TensorDict
+import IPython
 
 class SO101PickPlaceEnv:
     """
@@ -18,7 +19,6 @@ class SO101PickPlaceEnv:
         - joint_pos (6): Current joint positions (6th is gripper)
         - joint_vel (6): Current joint velocities (6th is gripper)
         - ee_pos (3): End-effector position
-        - ee_quat (4): End-effector orientation quaternion
         - object_pos (3): Object position
         - object_rel_pos (3): Object position relative to EE
         - target_pos (3): Target position for placing
@@ -54,7 +54,7 @@ class SO101PickPlaceEnv:
 
         # Task parameters
         self.success_threshold = 0.01
-        self.grasp_threshold = 0.01
+        self.grasp_threshold = 0.03
         self.table_surface_z = 0.835  # Object placed at this height on table
 
         # Dimensions
@@ -208,7 +208,7 @@ class SO101PickPlaceEnv:
         joint_targets = actions[:, :6]
         next_joint_targets = joint_targets * (self.joint_pos_max-self.joint_pos_min) / 2 + (self.joint_pos_max+self.joint_pos_min) / 2
         current_joint_pos = self.robot_entity.get_dofs_position(self.joint_indices)
-        clamped_next_joint_targets = torch.clamp(next_joint_targets, current_joint_pos-0.02, current_joint_pos+0.02)
+        clamped_next_joint_targets = torch.clamp(next_joint_targets, current_joint_pos-0.01, current_joint_pos+0.01)
         self.robot_entity.set_dofs_position(clamped_next_joint_targets, self.joint_indices)
 
         # Step simulation
@@ -222,6 +222,7 @@ class SO101PickPlaceEnv:
 
         # Reset done envs
         if dones.any():
+            # IPython.embed()
             self.reset(torch.where(dones)[0])
 
         info = {"success": self._check_success(obs)}
@@ -235,10 +236,16 @@ class SO101PickPlaceEnv:
         
         joint_vel = self.robot_entity.get_dofs_velocity(self.joint_indices)
         
-        ee_link = self.robot_entity.get_link("gripperframe")
-        ee_pos = ee_link.get_pos()
-        ee_quat = ee_link.get_quat()
-        
+        ee_wrist = self.robot_entity.get_link("ee_wrist")
+        ee_wrist_pos = ee_wrist.get_pos()
+        ee_wrist_quat = ee_wrist.get_quat()
+
+        ee_gripper = self.robot_entity.get_link("ee_gripper")
+        ee_gripper_pos = ee_gripper.get_pos()
+        ee_gripper_quat = ee_gripper.get_quat()
+
+        ee_pos = (ee_wrist_pos + ee_gripper_pos) / 2
+
         object_pos = self.object.get_pos()
         object_rel_pos = object_pos - ee_pos
         target_pos = self.target.get_pos()
@@ -247,7 +254,6 @@ class SO101PickPlaceEnv:
             "joint_pos": joint_pos,
             "joint_vel": joint_vel,
             "ee_pos": ee_pos,
-            "ee_quat": ee_quat,
             "object_pos": object_pos,
             "object_rel_pos": object_rel_pos,
             "target_pos": target_pos,
@@ -255,7 +261,7 @@ class SO101PickPlaceEnv:
 
     def _compute_rewards(self, obs: Dict, actions: torch.Tensor) -> torch.Tensor:
         """Compute rewards for pick (sponge) and place (in container) task."""
-        rewards = torch.zeros(self.num_envs, device=self.device)
+        rewards_dict = {}
 
         # Get states
         rel_pos = obs["object_rel_pos"]  # EE to sponge
@@ -263,29 +269,35 @@ class SO101PickPlaceEnv:
         obj_pos = obs["object_pos"]
         target_pos = obs["target_pos"]
         ee_pos = obs["ee_pos"]  # Already 3D from gripperframe
-        
-        # Gripper state (action[5]: +1 = open, -1 = closed)
-        # Use -0.7 threshold to ensure gripper is sufficiently closed for grasping
-        gripper_closed = obs["joint_pos"][:, 5] < -0.7  # True if sufficiently closed
-        
-        # Object height above table
-        object_height = obj_pos[:, 2] - self.table_surface_z  # Table surface where object is placed
-        object_lifted = (0.05 < object_height) & (object_height < 0.15) # 2cm above table = grasped
 
         # === PHASE 1: APPROACH + GRASP ===
         # Reward for moving toward sponge
-        rewards += -10.0 * dist_to_obj  # Move closer to sponge
+        rewards_dict["dist_to_obj_rewards"] = -10.0 * dist_to_obj  # Move closer to sponge
 
-        # Bonus for being close enough to grasp
+        # grasp rewards
+        # Gripper state (action[5]: +1 = open, -1 = closed)
+        # Use -0.7 threshold to ensure gripper is sufficiently closed for grasping
+        gripper_closed = obs["joint_pos"][:, 5] < -0.3                        # True if sufficiently closed
+        gripper_grabbing = gripper_closed & (obs["joint_pos"][:, 5] > actions[:, 5]+0.1)
         near_sponge = dist_to_obj < self.grasp_threshold
-        # rewards += 10.0 * near_sponge.float()
+        rewards_dict["close_gripper_near_sponge_rewards"] = 5.0 * (near_sponge).float() * torch.clamp(-obs["joint_pos"][:, 5], min=0.0) # close
+        rewards_dict["press_gripper_near_sponge_rewards"] = 5.0 * (near_sponge).float() * torch.clamp(obs["joint_pos"][:, 5]-actions[:, 5], min=0.0) # press
+        # print(f"{near_sponge=}")
+        # print(f"{gripper_closed=}")
+        # print(f"{gripper_grabbing=}")
+        # print(f'{obs["joint_pos"]=}')
+        # print(f'{actions=}')
 
         # CRITICAL: Reward for closing gripper when near sponge
         # This teaches the robot to actually grasp!
         # rewards += 10.0 * near_sponge.float() * gripper_closed.float()
 
+        # Object height above table
+        object_height = obj_pos[:, 2] - self.table_surface_z  # Table surface where object is placed
+        object_lifted = (0.05 < object_height) & (object_height < 0.15) # 2cm above table = grasped
+
         # Reward for lifting the sponge (verifies successful grasp)
-        rewards += 100.0 * object_lifted.float()
+        rewards_dict["object_lifted_rewards"] = 100.0 * object_lifted.float()
         
         # === PHASE 2: TRANSPORT + PLACE ===
         # Only reward placing if sponge is lifted (grasped)
@@ -293,35 +305,40 @@ class SO101PickPlaceEnv:
         
         # Distance from sponge to container (XY only for placement)
         dist_xy = torch.norm(target_pos[:, :2] - obj_pos[:, :2], dim=-1)
-        rewards += -10.0 * dist_xy * lifted_mask  # Move grasped sponge toward container
+        rewards_dict["lift_sponge_to_container_xy_penalty"] = -10.0 * dist_xy * lifted_mask  # Move grasped sponge toward container
         
         # Z distance (sponge should be at container height)
         container_z = target_pos[:, 2]
         dist_z = torch.abs(obj_pos[:, 2] - container_z)
-        rewards += -5.0 * dist_z * lifted_mask
+        rewards_dict["lift_sponge_to_container_z_penalty"] = -5.0 * dist_z * lifted_mask
         
         # Success bonus if sponge is inside container
         success = self._check_success(obs)
-        rewards += 100.0 * success.float()
+        rewards_dict["success_rewards"] = 10000.0 * success.float()
 
         # Penalties
         ## cannot continue 
         uncontinuable = (obs["object_pos"][:, 2] < 0.7) | (obs["target_pos"][:, 2] < 0.7)
-        rewards += -1000.0 * uncontinuable
+        rewards_dict["uncontinuable_penalty"] = -1000.0 * uncontinuable
 
         ## Do not move container too much.
-        rewards += -10.0 * torch.norm(self.init_target_positions-obs["target_pos"], dim=-1)
+        rewards_dict["container_shift_penalty"] = -10.0 * torch.norm(self.init_target_positions-obs["target_pos"], dim=-1)
         
         # === REGULARIZATION ===
         # Action smoothness
         action_diff = torch.norm(actions - self.prev_actions, dim=-1)
-        rewards += -0.01 * action_diff
+        rewards_dict["action_diff_penalty"] = -0.01 * action_diff
 
         # Small time penalty
-        rewards += -0.1
+        rewards_dict["lifetime_penalty"] = -0.1
 
         # Timeout penalty
-        rewards += -5.0 * (self.episode_length_buf >= self.max_episode_length).float()
+        rewards_dict["timeout_penalty"] = -5.0 * (self.episode_length_buf >= self.max_episode_length).float()
+
+        # print(f"{rewards_dict=}")
+
+        rewards = torch.zeros(self.num_envs, device=self.device)
+        rewards = sum([rewards for reward_key, rewards in rewards_dict.items()])
 
         self.prev_actions = actions.clone()
         return rewards
