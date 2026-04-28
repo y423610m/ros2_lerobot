@@ -57,7 +57,7 @@ uv run python scripts/train.py --num-envs 4096 --num-iterations 3000
 
 ### 4. Evaluate
 ```bash
-uv run python scripts/eval.py --num-episodes 3000 --model models/so101_pick_place_final.pt 
+uv run python scripts/eval.py --num-episodes 3000 --model models/$(ls -lrht models/ | awk '{print $NF}' | tail -n 1) 
 ```
 
 ### 5. Export for ROS2 Deployment

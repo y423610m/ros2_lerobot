@@ -130,6 +130,7 @@ class SO101PickPlaceEnv:
 
         # Track progress
         self.episode_length_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
+        self.init_object_positions = torch.zeros((self.num_envs, 3), device=self.device)
         self.init_target_positions = torch.zeros((self.num_envs, 3), device=self.device)
         self.prev_actions = torch.zeros((self.num_envs, self.action_dim), device=self.device)
 
@@ -169,6 +170,7 @@ class SO101PickPlaceEnv:
         obj_pos[:, 1] = torch.rand(len(env_ids), device=self.device) * 0.2 * 0.0 - 0.1
         obj_pos[:, 2] = 0.835  # On table surface
         self.object.set_pos(obj_pos, envs_idx=env_ids)
+        self.init_object_positions[env_ids] = obj_pos
         
         # Randomize sponge orientation (z-axis rotation only)
         obj_orn = torch.zeros(len(env_ids), 4, device=self.device)
@@ -180,7 +182,7 @@ class SO101PickPlaceEnv:
         tgt_pos = torch.zeros(len(env_ids), 3, device=self.device)
         tgt_pos[:, 0] = torch.rand(len(env_ids), device=self.device) * 0.2 * 0.0 - 0.4
         tgt_pos[:, 1] = torch.rand(len(env_ids), device=self.device) * 0.3 * 0.0 - 0.2
-        tgt_pos[:, 2] = 0.85  # On table surface
+        tgt_pos[:, 2] = 0.835  # On table surface
         self.target.set_pos(tgt_pos, envs_idx=env_ids)
         self.init_target_positions[env_ids] = tgt_pos
         
@@ -247,16 +249,20 @@ class SO101PickPlaceEnv:
         ee_pos = (ee_wrist_pos + ee_gripper_pos) / 2
 
         object_pos = self.object.get_pos()
+        object_quat = self.object.get_quat()
         object_rel_pos = object_pos - ee_pos
         target_pos = self.target.get_pos()
+        target_quat = self.target.get_quat()
         
         return TensorDict({
             "joint_pos": joint_pos,
             "joint_vel": joint_vel,
-            "ee_pos": ee_pos,
             "object_pos": object_pos,
-            "object_rel_pos": object_rel_pos,
+            "object_quat": object_quat,
             "target_pos": target_pos,
+            "target_quat": target_quat,
+            "object_rel_pos": object_rel_pos,
+            "ee_pos": ee_pos,
         })
 
     def _compute_rewards(self, obs: Dict, actions: torch.Tensor) -> torch.Tensor:
@@ -297,7 +303,7 @@ class SO101PickPlaceEnv:
         object_lifted = (0.05 < object_height) & (object_height < 0.15) # 2cm above table = grasped
 
         # Reward for lifting the sponge (verifies successful grasp)
-        rewards_dict["object_lifted_rewards"] = 100.0 * object_lifted.float()
+        rewards_dict["object_lifted_rewards"] = 100.0 * object_height
         
         # === PHASE 2: TRANSPORT + PLACE ===
         # Only reward placing if sponge is lifted (grasped)

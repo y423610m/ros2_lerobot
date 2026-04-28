@@ -48,6 +48,7 @@ ros-jazzy-joint-state-broadcaster = ">=4.37.0,<5"
 ros-jazzy-joint-trajectory-controller = ">=4.37.0,<5"
 ros-jazzy-ros2-control = ">=4.43.0,<5"
 ros-jazzy-controller-manager = ">=4.43.0,<5"
+tensorboard = ">=2.20.0,<3"
 
 [pypi-dependencies]
 lerobot = { version = ">=0.5.1, <0.6", extras = ["feetech"] }
