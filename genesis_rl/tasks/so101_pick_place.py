@@ -103,7 +103,7 @@ class SO101PickPlaceEnv:
         # Add robot (from URDF)
         # Robot URDF/MJCF path
         self.robot_path = "../src/lerobot_robots_description/urdf/SO101/so101_new_calib.urdf"
-        robot = options.morphs.URDF(file=self.robot_path, pos=(-0.4, 0.25, 0.8), fixed=True, collision=True, merge_fixed_links=False)
+        robot = options.morphs.URDF(file=self.robot_path, pos=(-0.4, 0.25, 0.8), fixed=True, collision=True, links_to_keep=["ee_wrist", "ee_gripper"], convexify=True)
         self.robot_entity = self.scene.add_entity(robot)
 
         # Add object (pink sponge to be picked up)
