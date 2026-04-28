@@ -265,6 +265,16 @@ class SO101PickPlaceEnv:
             "ee_pos": ee_pos,
         })
 
+    def _close_gripper(self):
+        for i in range(1000):
+            next_joint_targets = self.robot_entity.get_dofs_position(self.joint_indices)
+            next_joint_targets[:, 5] -= 0.01
+            clamped_next_joint_targets = torch.clamp(next_joint_targets, self.joint_pos_min, self.joint_pos_max)
+            self.robot_entity.set_dofs_position(clamped_next_joint_targets, self.joint_indices)
+            self.scene.step()
+        IPython.embed()
+
+
     def _compute_rewards(self, obs: Dict, actions: torch.Tensor) -> torch.Tensor:
         """Compute rewards for pick (sponge) and place (in container) task."""
         rewards_dict = {}
