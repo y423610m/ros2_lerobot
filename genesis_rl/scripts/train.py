@@ -77,6 +77,7 @@ def main():
     )
 
     # Save final model
+    os.makedirs("models", exist_ok=True)
     final_model_path = os.path.join("models", f"{experiment_name}_final.pt")
     runner.save(final_model_path)
     print(f"Saved final model to {final_model_path}")
