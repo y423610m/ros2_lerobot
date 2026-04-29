@@ -66,15 +66,23 @@ class SO101PickPlaceEnv:
         gs.init(logging_level="error")
 
         # Create scene
-        self.ctrl_dt = 0.01
+        self.ctrl_dt = 0.005
         self.scene = gs.Scene(
-            sim_options=gs.options.SimOptions(dt=self.ctrl_dt, substeps=2),
+            sim_options=gs.options.SimOptions(dt=self.ctrl_dt, substeps=10),
             rigid_options=gs.options.RigidOptions(
                 dt=self.ctrl_dt,
                 constraint_solver=gs.constraint_solver.Newton,
                 enable_collision=True,
                 enable_joint_limit=True,
+                constraint_timeconst=0.002,
+                iterations=200,
+                tolerance=1e-7,
+                ls_tolerance=1e-3
             ),
+            # mpm_options=gs.options.MPMOptions(
+            #     lower_bound=(-0.5, -0.5, 0.0),
+            #     upper_bound=(0.5, 0.5, 1.0),
+            # ),
             # vis_options=gs.options.VisOptions(rendered_envs_idx=list(range(10))),
             # viewer_options=gs.options.ViewerOptions(
             #     max_FPS=int(0.5 / self.ctrl_dt),
@@ -109,7 +117,8 @@ class SO101PickPlaceEnv:
         # Add object (pink sponge to be picked up)
         self.object_path = "../src/lerobot_robots_description/urdf/objects/pink_sponge.urdf"
         obj = options.morphs.URDF(file=self.object_path, pos=(0, 0.25, 0.9), collision=True)
-        self.object = self.scene.add_entity(obj)
+        obj_box = options.morphs.Box(size=(0.045, 0.021, 0.017), pos=(0, 0.25, 0.9), collision=True)
+        self.object = self.scene.add_entity(obj_box)
 
         # Add target (container to place sponge in)
         self.target_path = "../src/lerobot_robots_description/urdf/objects/container.urdf"
@@ -288,7 +297,7 @@ class SO101PickPlaceEnv:
 
         # === PHASE 1: APPROACH + GRASP ===
         # Reward for moving toward sponge
-        rewards_dict["dist_to_obj_rewards"] = -10.0 * dist_to_obj  # Move closer to sponge
+        rewards_dict["dist_to_obj_rewards"] = -100.0 * dist_to_obj  # Move closer to sponge
 
         # grasp rewards
         # Gripper state (action[5]: +1 = open, -1 = closed)
@@ -296,8 +305,8 @@ class SO101PickPlaceEnv:
         gripper_closed = obs["joint_pos"][:, 5] < -0.3                        # True if sufficiently closed
         gripper_grabbing = gripper_closed & (obs["joint_pos"][:, 5] > actions[:, 5]+0.1)
         near_sponge = dist_to_obj < self.grasp_threshold
-        rewards_dict["close_gripper_near_sponge_rewards"] = 5.0 * (near_sponge).float() * torch.clamp(-obs["joint_pos"][:, 5], min=0.0) # close
-        rewards_dict["press_gripper_near_sponge_rewards"] = 5.0 * (near_sponge).float() * torch.clamp(obs["joint_pos"][:, 5]-actions[:, 5], min=0.0) # press
+        # rewards_dict["close_gripper_near_sponge_rewards"] = 5.0 * (near_sponge).float() * torch.clamp(-obs["joint_pos"][:, 5], min=0.0) # close
+        # rewards_dict["press_gripper_near_sponge_rewards"] = 5.0 * (near_sponge).float() * torch.clamp(obs["joint_pos"][:, 5]-actions[:, 5], min=0.0) # press
         # print(f"{near_sponge=}")
         # print(f"{gripper_closed=}")
         # print(f"{gripper_grabbing=}")
@@ -313,7 +322,7 @@ class SO101PickPlaceEnv:
         object_lifted = (0.05 < object_height) & (object_height < 0.15) # 2cm above table = grasped
 
         # Reward for lifting the sponge (verifies successful grasp)
-        rewards_dict["object_lifted_rewards"] = 100.0 * object_height
+        rewards_dict["object_lifted_rewards"] = 10.0 * object_height
         
         # === PHASE 2: TRANSPORT + PLACE ===
         # Only reward placing if sponge is lifted (grasped)
@@ -335,7 +344,7 @@ class SO101PickPlaceEnv:
         # Penalties
         ## cannot continue 
         uncontinuable = (obs["object_pos"][:, 2] < 0.7) | (obs["target_pos"][:, 2] < 0.7)
-        rewards_dict["uncontinuable_penalty"] = -1000.0 * uncontinuable
+        rewards_dict["uncontinuable_penalty"] = -100.0 * uncontinuable
 
         ## Do not move container too much.
         rewards_dict["container_shift_penalty"] = -10.0 * torch.norm(self.init_target_positions-obs["target_pos"], dim=-1)
