@@ -112,13 +112,25 @@ class SO101PickPlaceEnv:
         # Robot URDF/MJCF path
         self.robot_path = "../src/lerobot_robots_description/urdf/SO101/so101_new_calib.urdf"
         robot = options.morphs.URDF(file=self.robot_path, pos=(-0.4, 0.25, 0.8), fixed=True, collision=True, links_to_keep=["ee_wrist", "ee_gripper"], convexify=True)
-        self.robot_entity = self.scene.add_entity(robot)
+        self.robot_entity = self.scene.add_entity(
+            robot,
+            material=gs.materials.Rigid(
+                friction=2.0,
+                sdf_cell_size=1e-3,
+            )
+        )
 
         # Add object (pink sponge to be picked up)
         self.object_path = "../src/lerobot_robots_description/urdf/objects/pink_sponge.urdf"
         obj = options.morphs.URDF(file=self.object_path, pos=(0, 0.25, 0.9), collision=True)
         obj_box = options.morphs.Box(size=(0.045, 0.021, 0.017), pos=(0, 0.25, 0.9), collision=True)
-        self.object = self.scene.add_entity(obj_box)
+        self.object = self.scene.add_entity(
+            obj_box,
+            material=gs.materials.Rigid(
+                friction=5.0,
+                sdf_cell_size=1e-3,
+            )
+        )
 
         # Add target (container to place sponge in)
         self.target_path = "../src/lerobot_robots_description/urdf/objects/container.urdf"
