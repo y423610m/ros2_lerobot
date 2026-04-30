@@ -55,7 +55,9 @@ obs_groups:
   actor:
   - joint_pos
   - object_pos
+  - object_quat
   - target_pos
+  - target_quat
 
 
   critic:
@@ -63,8 +65,10 @@ obs_groups:
   - joint_vel
   - ee_pos
   - object_pos
+  - object_quat
   - object_rel_pos
   - target_pos
+  - target_quat
 
 runner:
   checkpoint: -1

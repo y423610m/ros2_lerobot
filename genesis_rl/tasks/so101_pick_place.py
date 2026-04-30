@@ -68,7 +68,11 @@ class SO101PickPlaceEnv:
         # Create scene
         self.ctrl_dt = 0.005
         self.scene = gs.Scene(
-            sim_options=gs.options.SimOptions(dt=self.ctrl_dt, substeps=10),
+            sim_options=gs.options.SimOptions(
+                dt=self.ctrl_dt,
+                substeps=10,
+                # requires_grad=True,
+            ),
             rigid_options=gs.options.RigidOptions(
                 dt=self.ctrl_dt,
                 constraint_solver=gs.constraint_solver.Newton,
@@ -76,6 +80,7 @@ class SO101PickPlaceEnv:
                 enable_joint_limit=True,
                 constraint_timeconst=0.002,
                 iterations=200,
+                ls_iterations=200,
                 tolerance=1e-7,
                 ls_tolerance=1e-3
             ),
