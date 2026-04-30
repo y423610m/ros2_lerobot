@@ -74,7 +74,7 @@ class SO101PickPlaceEnv:
         )
 
         # Create scene
-        self.ctrl_dt = 0.01
+        self.ctrl_dt = 1e-4
         self.scene = gs.Scene(
             sim_options=gs.options.SimOptions(
                 dt=self.ctrl_dt,
@@ -92,10 +92,12 @@ class SO101PickPlaceEnv:
                 tolerance=1e-7,
                 ls_tolerance=1e-3
             ),
-            # mpm_options=gs.options.MPMOptions(
-            #     lower_bound=(-0.5, -0.5, 0.0),
-            #     upper_bound=(0.5, 0.5, 1.0),
-            # ),
+
+            mpm_options=gs.options.MPMOptions(
+                lower_bound   = (-0.6, -0.3, 0.6),
+                upper_bound   = (-0.2,  0.2, 1.2),
+                particle_size = 1e-3,
+            ),
             # vis_options=gs.options.VisOptions(rendered_envs_idx=list(range(10))),
             # viewer_options=gs.options.ViewerOptions(
             #     max_FPS=int(0.5 / self.ctrl_dt),
@@ -128,7 +130,7 @@ class SO101PickPlaceEnv:
         self.robot_entity = self.scene.add_entity(
             robot,
             material=gs.materials.Rigid(
-                friction=2.0,
+                friction=5.0,
                 sdf_cell_size=1e-3,
             )
         )
@@ -137,13 +139,15 @@ class SO101PickPlaceEnv:
         self.object_path = "../src/lerobot_robots_description/urdf/objects/pink_sponge.urdf"
         obj = options.morphs.URDF(file=self.object_path, pos=(0, 0.25, 0.9), collision=True)
         # obj_box = options.morphs.Box(size=(0.045, 0.021, 0.017), pos=(0, 0.25, 0.9), collision=True)
-        obj_box = options.morphs.Box(size=(0.03, 0.03, 0.03), pos=(0, 0.25, 0.9), quat=(1.0, 0.0, 0.0, 0.0), collision=True)
+        obj_box = options.morphs.Box(size=(0.02, 0.02, 0.02), pos=(-.4, -0.1, 0.85), quat=(1.0, 0.0, 0.0, 0.0), collision=True)
         self.object = self.scene.add_entity(
             obj_box,
-            material=gs.materials.Rigid(
-                friction=5.0,
-                sdf_cell_size=1e-3,
-            )
+            # material=gs.materials.Rigid(
+            #     friction=5.0,
+            #     sdf_cell_size=1e-3,
+            # ),
+            material=gs.materials.MPM.ElastoPlastic(),
+            # material=gs.materials.MPM.Elastic(),
         )
 
         # Add target (container to place sponge in)
@@ -153,7 +157,7 @@ class SO101PickPlaceEnv:
 
         # Build scene
         self.scene.build(n_envs=self.num_envs, env_spacing=(env_spacing, env_spacing))
-
+        # import IPython; IPython.embed()
         self.joint_pos_min, self.joint_pos_max = self.robot_entity.get_dofs_limit()
 
         # Get joint indices (DOF indices for each joint)
@@ -204,7 +208,8 @@ class SO101PickPlaceEnv:
         obj_pos[:, 0] = torch.rand(len(env_ids), device=self.device) * 0.2 * 0.0 - 0.4
         obj_pos[:, 1] = torch.rand(len(env_ids), device=self.device) * 0.2 * 0.0 - 0.1
         obj_pos[:, 2] = 0.88  # On table surface
-        self.object.set_pos(obj_pos, envs_idx=env_ids, skip_forward=True)
+        # self.object.set_pos(obj_pos, envs_idx=env_ids, skip_forward=True)
+        self.object.set_position(obj_pos, envs_idx=env_ids)
         self.init_object_positions[env_ids] = obj_pos
         
         # Randomize sponge orientation (z-axis rotation only)
@@ -212,7 +217,7 @@ class SO101PickPlaceEnv:
         obj_orn_raw = torch.randn(len(env_ids), 4, device=self.device) * 0.0
         obj_orn = obj_orn_raw / torch.norm(obj_orn_raw, dim=1, keepdim=True)
         obj_orn = torch.tensor([0.0, 1.0, 0.0, 0.0], device=self.device).expand(len(env_ids), -1)
-        self.object.set_quat(obj_orn, envs_idx=env_ids, skip_forward=False)
+        # self.object.set_quat(obj_orn, envs_idx=env_ids, skip_forward=False)
 
         # Randomize target (container) position and orientation (full 3D)
         tgt_pos = torch.zeros(len(env_ids), 3, device=self.device)
@@ -283,9 +288,13 @@ class SO101PickPlaceEnv:
         ee_gripper_quat = ee_gripper.get_quat()
 
         ee_pos = (ee_wrist_pos + ee_gripper_pos) / 2
-
-        object_pos = self.object.get_pos()
-        object_quat = self.object.get_quat()
+        # IPython.embed()
+        state = self.object.get_state()
+        active_mask = state.active[0].bool()  # shape: (8104,)
+        object_pos = state.pos[0].mean(dim=0).unsqueeze(0)
+        object_quat = torch.tensor([0.0, 1.0, 0.0, 0.0], device=self.device).expand(self.num_envs, -1)
+        # object_pos = self.object.get_pos()
+        # object_quat = self.object.get_quat()
         object_rel_pos = object_pos - ee_pos
         target_pos = self.target.get_pos()
         target_quat = self.target.get_quat()
