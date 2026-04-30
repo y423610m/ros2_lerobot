@@ -63,10 +63,18 @@ class SO101PickPlaceEnv:
         self.num_actions = 6
 
         # Initialize Genesis
-        gs.init(logging_level="error")
+        gs.init(
+            seed                = None,
+            precision           = '64',
+            debug               = False,
+            eps                 = 1e-12,
+            logging_level       = "error",
+            theme               = 'dark',
+            logger_verbose_time = False
+        )
 
         # Create scene
-        self.ctrl_dt = 0.005
+        self.ctrl_dt = 0.01
         self.scene = gs.Scene(
             sim_options=gs.options.SimOptions(
                 dt=self.ctrl_dt,
@@ -128,7 +136,8 @@ class SO101PickPlaceEnv:
         # Add object (pink sponge to be picked up)
         self.object_path = "../src/lerobot_robots_description/urdf/objects/pink_sponge.urdf"
         obj = options.morphs.URDF(file=self.object_path, pos=(0, 0.25, 0.9), collision=True)
-        obj_box = options.morphs.Box(size=(0.045, 0.021, 0.017), pos=(0, 0.25, 0.9), collision=True)
+        # obj_box = options.morphs.Box(size=(0.045, 0.021, 0.017), pos=(0, 0.25, 0.9), collision=True)
+        obj_box = options.morphs.Box(size=(0.03, 0.03, 0.03), pos=(0, 0.25, 0.9), quat=(1.0, 0.0, 0.0, 0.0), collision=True)
         self.object = self.scene.add_entity(
             obj_box,
             material=gs.materials.Rigid(
@@ -194,15 +203,16 @@ class SO101PickPlaceEnv:
         obj_pos = torch.zeros(len(env_ids), 3, device=self.device)
         obj_pos[:, 0] = torch.rand(len(env_ids), device=self.device) * 0.2 * 0.0 - 0.4
         obj_pos[:, 1] = torch.rand(len(env_ids), device=self.device) * 0.2 * 0.0 - 0.1
-        obj_pos[:, 2] = 0.835  # On table surface
-        self.object.set_pos(obj_pos, envs_idx=env_ids)
+        obj_pos[:, 2] = 0.88  # On table surface
+        self.object.set_pos(obj_pos, envs_idx=env_ids, skip_forward=True)
         self.init_object_positions[env_ids] = obj_pos
         
         # Randomize sponge orientation (z-axis rotation only)
         obj_orn = torch.zeros(len(env_ids), 4, device=self.device)
         obj_orn_raw = torch.randn(len(env_ids), 4, device=self.device) * 0.0
         obj_orn = obj_orn_raw / torch.norm(obj_orn_raw, dim=1, keepdim=True)
-        self.object.set_quat(obj_orn, envs_idx=env_ids)
+        obj_orn = torch.tensor([0.0, 1.0, 0.0, 0.0], device=self.device).expand(len(env_ids), -1)
+        self.object.set_quat(obj_orn, envs_idx=env_ids, skip_forward=False)
 
         # Randomize target (container) position and orientation (full 3D)
         tgt_pos = torch.zeros(len(env_ids), 3, device=self.device)
