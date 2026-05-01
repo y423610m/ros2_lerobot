@@ -30,7 +30,7 @@
   </default>
   <worldbody>
     <!-- Link base -->
-    <body name="base" pos="0 0 0" quat="1 0 0 0" childclass="so101_new_calib">
+    <body name="base" pos="-0.4 0.25 0.825" quat="-0.70710678 0 0 0.70710678" childclass="so101_new_calib">
       <inertial pos="0.0137179 -5.19711e-05 0.0334843" mass="0.147" fullinertia="0.000114686 0.000136117 0.000130364 -4.59787e-07 4.97151e-06 9.75275e-08"/>
       <!-- Part base_motor_holder_so101_v1 -->
       <geom type="mesh" class="visual" pos="-0.00636471 -9.94414e-05 -0.0024" quat="0.5 0.5 0.5 0.5" mesh="base_motor_holder_so101_v1" material="base_motor_holder_so101_v1_material"/>
@@ -123,19 +123,19 @@
     </body>
   </worldbody>
   <asset>
-    <mesh file="waveshare_mounting_plate_so101_v2.stl"/>
-    <mesh file="sts3215_03a_v1.stl"/>
-    <mesh file="motor_holder_so101_base_v1.stl"/>
-    <mesh file="wrist_roll_follower_so101_v1.stl"/>
-    <mesh file="moving_jaw_so101_v1.stl"/>
-    <mesh file="base_motor_holder_so101_v1.stl"/>
-    <mesh file="upper_arm_so101_v1.stl"/>
-    <mesh file="wrist_roll_pitch_so101_v2.stl"/>
-    <mesh file="under_arm_so101_v1.stl"/>
-    <mesh file="rotation_pitch_so101_v1.stl"/>
-    <mesh file="motor_holder_so101_wrist_v1.stl"/>
-    <mesh file="sts3215_03a_no_horn_v1.stl"/>
-    <mesh file="base_so101_v2.stl"/>
+    <mesh file="assets/waveshare_mounting_plate_so101_v2.stl"/>
+    <mesh file="assets/sts3215_03a_v1.stl"/>
+    <mesh file="assets/motor_holder_so101_base_v1.stl"/>
+    <mesh file="assets/wrist_roll_follower_so101_v1.stl"/>
+    <mesh file="assets/moving_jaw_so101_v1.stl"/>
+    <mesh file="assets/base_motor_holder_so101_v1.stl"/>
+    <mesh file="assets/upper_arm_so101_v1.stl"/>
+    <mesh file="assets/wrist_roll_pitch_so101_v2.stl"/>
+    <mesh file="assets/under_arm_so101_v1.stl"/>
+    <mesh file="assets/rotation_pitch_so101_v1.stl"/>
+    <mesh file="assets/motor_holder_so101_wrist_v1.stl"/>
+    <mesh file="assets/sts3215_03a_no_horn_v1.stl"/>
+    <mesh file="assets/base_so101_v2.stl"/>
     <material name="base_motor_holder_so101_v1_material" rgba="0.964706 0.964706 0.952941 1"/>
     <material name="base_so101_v2_material" rgba="0.964706 0.964706 0.952941 1"/>
     <material name="sts3215_03a_v1_material" rgba="0.627451 0.627451 0.627451 1"/>
