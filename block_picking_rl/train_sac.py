@@ -23,7 +23,7 @@ from stable_baselines3.common.callbacks import (
     EvalCallback,
 )
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import SubprocVecEnv, VecNormalize
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
 
 from envs.block_picking_env import BlockPickingEnv
 
@@ -50,7 +50,7 @@ CONFIG: dict = {
     "net_arch":          [256, 256, 256],
     # Schedule
     "total_timesteps":   2_000_000,
-    "eval_freq":         20_000,
+    "eval_freq":         2_000,
     "n_eval_episodes":   10,
     "save_freq":         50_000,
     # Paths
@@ -146,11 +146,12 @@ def train(render: bool = False) -> SAC:
     ])
     vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True, clip_obs=10.0)
 
-    eval_env = Monitor(BlockPickingEnv(
+    eval_env = DummyVecEnv([lambda: Monitor(BlockPickingEnv(
         max_episode_steps=CONFIG["max_episode_steps"],
         random_block_pos=True,
         reward_type="dense",
-    ))
+    ))])
+    eval_env = VecNormalize(eval_env, norm_obs=True, norm_reward=False, clip_obs=10.0)
 
     model = SAC(
         policy="MlpPolicy",
@@ -221,28 +222,44 @@ def train(render: bool = False) -> SAC:
 
 
 def evaluate(checkpoint: str, n_episodes: int = 20, render: bool = True) -> None:
-    env = Monitor(BlockPickingEnv(
+    vec_normalize_path = Path(checkpoint).parent / "vec_normalize_final.pkl"
+
+    env = DummyVecEnv([lambda: Monitor(BlockPickingEnv(
         render_mode="human" if render else None,
         max_episode_steps=CONFIG["max_episode_steps"],
         random_block_pos=True,
-    ))
+    ))])
+
+    if vec_normalize_path.exists():
+        env = VecNormalize.load(str(vec_normalize_path), env)
+        env.training = False    # freeze stats, do not update during eval
+        env.norm_reward = False # evaluate on raw rewards
+        print(f"Loaded VecNormalize stats from {vec_normalize_path}")
+    else:
+        print(f"Warning: {vec_normalize_path} not found, running without obs normalization")
+
     model = SAC.load(checkpoint, env=env)
 
     rewards, lengths, successes = [], [], []
     for ep in range(n_episodes):
-        obs, _ = env.reset()
+        obs = env.reset()
         done = False
         ep_reward = 0.0
         ep_len = 0
         while not done:
             action, _ = model.predict(obs, deterministic=True)
-            obs, reward, terminated, truncated, info = env.step(action)
-            ep_reward += reward
+            obs, reward, done, info = env.step(action)
+            if render:
+                env.render()
+            ep_reward += float(reward[0])
             ep_len += 1
-            done = terminated or truncated
+            import IPython
+            # IPython.embed()
+            # print(f"{action[0]=}")
+            # print(f"{obs[0][19:19+6]=}")
         rewards.append(ep_reward)
         lengths.append(ep_len)
-        successes.append(float(info.get("is_success", False)))
+        successes.append(float(info[0].get("is_success", False)))
         print(f"  ep {ep+1:2d}: reward={ep_reward:+7.1f}  len={ep_len:3d}  success={bool(successes[-1])}")
 
     print(f"\nResults over {n_episodes} episodes:")

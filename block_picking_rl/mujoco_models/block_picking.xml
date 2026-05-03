@@ -75,16 +75,6 @@
 
   </worldbody>
 
-  <!-- 6 actuators, one per joint, uniform treatment -->
-  <actuator>
-    <motor name="act_shoulder_pan" joint="shoulder_pan" gear="60"/>
-    <motor name="act_shoulder_lift" joint="shoulder_lift" gear="60"/>
-    <motor name="act_elbow_flex" joint="elbow_flex" gear="40"/>
-    <motor name="act_wrist_flex" joint="wrist_flex" gear="20"/>
-    <motor name="act_wrist_roll" joint="wrist_roll" gear="10"/>
-    <motor name="act_gripper" joint="gripper" gear="4"/>
-  </actuator>
-
   <sensor>
     <framepos    name="ee_pos"    objtype="site" objname="gripperframe"/>
     <framequat   name="ee_quat"   objtype="site" objname="gripperframe"/>
