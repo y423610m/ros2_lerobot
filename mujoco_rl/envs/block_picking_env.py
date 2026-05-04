@@ -12,11 +12,11 @@ All 6 joints are treated uniformly:
   wrist_roll    - wrist roll     (hinge, X)
   gripper       - gripper finger (slide, Y)
 
-Observation space (29-dim):
+Observation space (25-dim):
   joint_pos        (6)   joint positions
   joint_vel        (6)   joint velocities
   ee_pos           (3)   end-effector position [m]
-  ee_quat          (4)   end-effector orientation (quaternion)
+#   ee_quat          (4)   end-effector orientation (quaternion)
   block_pos        (3)   block position [m]
   block_vel        (3)   block linear velocity [m/s]
   ee_to_block      (3)   vector from EE to block [m]
@@ -83,7 +83,7 @@ class BlockPickingEnv(MujocoEnv):
         self._episode_count = 0
 
         observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(29,), dtype=np.float32
+            low=-np.inf, high=np.inf, shape=(25,), dtype=np.float32
         )
 
         super().__init__(
@@ -111,6 +111,8 @@ class BlockPickingEnv(MujocoEnv):
         ]
         # ee_pos
         self._ee_sid    = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SITE, "gripperframe")
+        self._ee_gripper_sid    = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SITE, "ee_gripper")
+        self._ee_wrist_sid    = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SITE, "ee_wrist")
         self._block_sid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SITE, "block_site")
 
         blk_jid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, "block_joint")
@@ -167,10 +169,13 @@ class BlockPickingEnv(MujocoEnv):
         joint_pos = np.array([d.qpos[m.jnt_qposadr[jid]] for jid in self._joint_ids])
         joint_vel = np.array([d.qvel[m.jnt_dofadr[jid]]  for jid in self._joint_ids])
 
-        ee_pos  = d.site_xpos[self._ee_sid].copy()
-        ee_xmat = d.site_xmat[self._ee_sid].reshape(3, 3)
-        ee_quat = np.zeros(4)
-        mujoco.mju_mat2Quat(ee_quat, ee_xmat.flatten())
+        # ee_pos  = d.site_xpos[self._ee_sid].copy()
+        ee_gripper = d.site_xpos[self._ee_gripper_sid].copy()
+        ee_wrist = d.site_xpos[self._ee_wrist_sid].copy()
+        ee_pos = (ee_gripper + ee_wrist) / 2.0
+        # ee_xmat = d.site_xmat[self._ee_sid].reshape(3, 3)
+        # ee_quat = np.zeros(4)
+        # mujoco.mju_mat2Quat(ee_quat, ee_xmat.flatten())
 
         block_pos = d.site_xpos[self._block_sid].copy()
         block_vel = d.qvel[self._blk_qvel_adr:self._blk_qvel_adr + 3].copy()
@@ -182,7 +187,7 @@ class BlockPickingEnv(MujocoEnv):
             joint_pos,        # 6
             joint_vel,        # 6
             ee_pos,           # 3
-            ee_quat,          # 4
+            # ee_quat,          # 4
             block_pos,        # 3
             block_vel,        # 3
             ee_to_block,      # 3
@@ -194,7 +199,10 @@ class BlockPickingEnv(MujocoEnv):
     # ------------------------------------------------------------------
 
     def _compute_reward(self, action: np.ndarray) -> tuple[float, dict]:
-        ee_pos    = self.data.site_xpos[self._ee_sid].copy()
+        # ee_pos    = self.data.site_xpos[self._ee_sid].copy()
+        ee_gripper = self.data.site_xpos[self._ee_gripper_sid].copy()
+        ee_wrist = self.data.site_xpos[self._ee_wrist_sid].copy()
+        ee_pos = (ee_gripper + ee_wrist) / 2.0
         block_pos = self.data.site_xpos[self._block_sid].copy()
 
         d_ee_block     = float(np.linalg.norm(block_pos - ee_pos))
