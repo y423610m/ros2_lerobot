@@ -39,13 +39,13 @@ import IPython
 
 CONFIG: dict = {
     # Environment
-    "n_envs":            4,
+    "n_envs":            32,
     "max_episode_steps": 500,
     # SAC
     "learning_rate":     3e-4,
     "buffer_size":       1_000_000,
     "learning_starts":   10_000,
-    "batch_size":        256,
+    "batch_size":        2048,
     "tau":               0.005,
     "gamma":             0.99,
     "train_freq":        1,
