@@ -14,6 +14,8 @@ import argparse
 import time
 from pathlib import Path
 
+import datetime
+
 import numpy as np
 import torch
 from stable_baselines3 import SAC
@@ -133,6 +135,9 @@ def _make_env(rank: int, seed: int, render_mode: str | None = None):
 
 
 def train(render: bool = False) -> SAC:
+    taskid = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    CONFIG["log_dir"] += f"{taskid}/"
+    CONFIG["checkpoint_dir"] += f"{taskid}/"
     Path(CONFIG["log_dir"]).mkdir(parents=True, exist_ok=True)
     Path(CONFIG["checkpoint_dir"]).mkdir(parents=True, exist_ok=True)
 
@@ -203,7 +208,7 @@ def train(render: bool = False) -> SAC:
         total_timesteps=CONFIG["total_timesteps"],
         callback=callbacks,
         progress_bar=True,
-        tb_log_name="sac",
+        tb_log_name=taskid,
     )
     elapsed = time.time() - t0
     print(f"Training complete in {elapsed / 3600:.2f}h")
