@@ -148,6 +148,9 @@ class BlockPickingEnv(MujocoEnv):
 
     def step(self, action: np.ndarray):
         action = np.clip(action, -1.0, 1.0)
+        ctrl_low  = self.model.actuator_ctrlrange[:, 0]
+        ctrl_high = self.model.actuator_ctrlrange[:, 1]
+        ctrl = ctrl_low + (action + 1.0) * 0.5 * (ctrl_high - ctrl_low)
         self.do_simulation(action, self.frame_skip)
         self._step_count += 1
 
@@ -166,7 +169,10 @@ class BlockPickingEnv(MujocoEnv):
     def _get_obs(self) -> np.ndarray:
         d, m = self.data, self.model
 
-        joint_pos = np.array([d.qpos[m.jnt_qposadr[jid]] for jid in self._joint_ids])
+        raw_joint_pos = np.array([d.qpos[m.jnt_qposadr[jid]] for jid in self._joint_ids])
+        jnt_low  = np.array([m.jnt_range[jid, 0] for jid in self._joint_ids])
+        jnt_high = np.array([m.jnt_range[jid, 1] for jid in self._joint_ids])
+        joint_pos = 2.0 * (raw_joint_pos - jnt_low) / (jnt_high - jnt_low) - 1.0
         joint_vel = np.array([d.qvel[m.jnt_dofadr[jid]]  for jid in self._joint_ids])
 
         # ee_pos  = d.site_xpos[self._ee_sid].copy()
