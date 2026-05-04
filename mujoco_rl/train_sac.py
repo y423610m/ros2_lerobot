@@ -5,7 +5,9 @@ Usage:
     uv run python train_sac.py                          # train with defaults
     uv run python train_sac.py --render                 # visualize during training
     uv run python train_sac.py --timesteps 200000       # quick test run
-    uv run python train_sac.py --eval --checkpoint checkpoints/best_model
+    uv run python train_sac.py --eval --render --checkpoint checkpoints/best_model
+    
+    uv run python -m mujoco.viewer --mjcf block_picking.xml
 """
 
 from __future__ import annotations
@@ -28,6 +30,8 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
 
 from envs.block_picking_env import BlockPickingEnv
+
+import IPython
 
 # ---------------------------------------------------------------------------
 # Hyperparameters
@@ -105,6 +109,10 @@ class TBCallback(BaseCallback):
         for info in self.locals.get("infos", []):
             if "is_success" in info:
                 self._successes.append(float(info["is_success"]))
+        for info in self.locals.get("infos", []):
+            for key in info:
+                if key.startswith('r_'):
+                    self.logger.record(f"train/{key}", info[key])
         if len(self._successes) >= 100:
             self.logger.record("rollout/success_rate", np.mean(self._successes[-100:]))
         return True
@@ -251,6 +259,7 @@ def evaluate(checkpoint: str, n_episodes: int = 20, render: bool = True) -> None
         done = False
         ep_reward = 0.0
         ep_len = 0
+        IPython.embed()
         while not done:
             action, _ = model.predict(obs, deterministic=True)
             obs, reward, done, info = env.step(action)
@@ -258,9 +267,7 @@ def evaluate(checkpoint: str, n_episodes: int = 20, render: bool = True) -> None
                 env.render()
             ep_reward += float(reward[0])
             ep_len += 1
-            import IPython
-            # IPython.embed()
-            # print(f"{action[0]=}")
+            print(f"{action[0]=}")
             # print(f"{obs[0][19:19+6]=}")
         rewards.append(ep_reward)
         lengths.append(ep_len)
@@ -275,6 +282,49 @@ def evaluate(checkpoint: str, n_episodes: int = 20, render: bool = True) -> None
     env.close()
 
 
+def check(checkpoint: str, n_episodes: int = 20, render: bool = True) -> None:
+    vec_normalize_path = Path(checkpoint).parent / "vec_normalize_final.pkl"
+
+    env = DummyVecEnv([lambda: Monitor(BlockPickingEnv(
+        render_mode="human" if render else None,
+        max_episode_steps=CONFIG["max_episode_steps"],
+        random_block_pos=True,
+    ))])
+
+    if vec_normalize_path.exists():
+        env = VecNormalize.load(str(vec_normalize_path), env)
+        env.training = False    # freeze stats, do not update during eval
+        env.norm_reward = False # evaluate on raw rewards
+        print(f"Loaded VecNormalize stats from {vec_normalize_path}")
+    else:
+        print(f"Warning: {vec_normalize_path} not found, running without obs normalization")
+
+    for ep in range(n_episodes):
+        obs = env.reset()
+        done = False
+        ep_reward = 0.0
+        ep_len = 0
+        # IPython.embed()
+        action = np.array([[0, 0, 0, 0, 0, 0]], np.float32)
+        cnt = 0
+        e = env.envs[0].env
+        while 1:
+            action[0][5] = np.sin(cnt * np.pi / 180)
+            obs, reward, done, info = env.step(action)
+            if render:
+                env.render()
+            ep_reward += float(reward[0])
+            ep_len += 1
+            # print(f"{action[0]=}")
+            d = e.data
+            ee_gripper = d.site_xpos[e._ee_gripper_sid].copy()
+            ee_wrist = d.site_xpos[e._ee_wrist_sid].copy()
+            print(f"{obs[0][12:12+3]=}")
+            print(f"{ee_gripper=}")
+            print(f"{ee_wrist=}")
+            cnt += 1
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -284,8 +334,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--render",      action="store_true")
     parser.add_argument("--eval",        action="store_true")
+    parser.add_argument("--check",        action="store_true")
     parser.add_argument("--checkpoint",  type=str, default="checkpoints/best_model")
-    parser.add_argument("--n-eval-eps",  type=int, default=20)
+    parser.add_argument("--n-eval-eps",  type=int, default=3)
     parser.add_argument("--timesteps",   type=int, default=None)
     args = parser.parse_args()
 
@@ -294,6 +345,8 @@ def main() -> None:
 
     if args.eval:
         evaluate(args.checkpoint, n_episodes=args.n_eval_eps, render=args.render)
+    if args.check:
+        check(args.checkpoint, n_episodes=args.n_eval_eps, render=args.render)
     else:
         train(render=args.render)
 

@@ -18,6 +18,7 @@
   -->
 
   <include file="../../src/lerobot_robots_description/urdf/SO101/so101_new_calib.xml"/>
+  <!-- <include file="/home/mujin/private/ros2_lerobot/src/lerobot_robots_description/urdf/SO101/so101_new_calib.xml"/> -->
 
   <compiler angle="radian" autolimits="true"/>
   <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast"/>

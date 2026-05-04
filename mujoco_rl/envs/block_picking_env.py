@@ -210,7 +210,7 @@ class BlockPickingEnv(MujocoEnv):
         block_height   = float(block_pos[2] - TABLE_Z)
 
         gripper_pos = self.data.qpos[self.model.jnt_qposadr[self._joint_ids[5]]]  # gripper joint
-        is_grasping = d_ee_block < 0.06 and gripper_pos < 0.010
+        is_grasping = d_ee_block < 0.02 and gripper_pos < 0.010
         is_lifted   = block_height > LIFT_THRESHOLD
         is_success  = d_block_target < PLACE_THRESHOLD and block_height < LIFT_THRESHOLD + 0.01
 
