@@ -144,7 +144,6 @@ def _make_env(rank: int, seed: int, render_mode: str | None = None):
 
 def train(render: bool = False) -> SAC:
     taskid = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    CONFIG["log_dir"] += f"{taskid}/"
     CONFIG["checkpoint_dir"] += f"{taskid}/"
     Path(CONFIG["log_dir"]).mkdir(parents=True, exist_ok=True)
     Path(CONFIG["checkpoint_dir"]).mkdir(parents=True, exist_ok=True)
