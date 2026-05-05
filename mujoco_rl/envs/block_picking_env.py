@@ -135,12 +135,10 @@ class BlockPickingEnv(MujocoEnv):
             self.data.qpos[self.model.jnt_qposadr[jid]] = init_qpos[i]
 
         if self._random_block_pos:
-            bx = self.np_random.uniform(0.12, 0.48)
-            by = self.np_random.uniform(-0.14, 0.14)
+            bx = self.np_random.uniform(-0.5, -0.3)
+            by = self.np_random.uniform(-0.1, 0.1)
         else:
             bx, by = 0.30, 0.00
-        bx = -0.4
-        by = -0.0
         bz = TABLE_Z + 0.025
         self.data.qpos[self._blk_qpos_adr:self._blk_qpos_adr + 3] = [bx, by, bz]
         self.data.qpos[self._blk_qpos_adr + 3:self._blk_qpos_adr + 7] = [1, 0, 0, 0]
@@ -243,10 +241,10 @@ class BlockPickingEnv(MujocoEnv):
     # ------------------------------------------------------------------
 
     def _compute_reward(self, action: np.ndarray) -> tuple[float, dict]:
-        # ee_pos    = self.data.site_xpos[self._ee_sid].copy()
+        ee_pos    = self.data.site_xpos[self._ee_sid].copy()
         ee_gripper = self.data.site_xpos[self._ee_gripper_sid].copy()
         ee_wrist = self.data.site_xpos[self._ee_wrist_sid].copy()
-        ee_pos = (ee_gripper + ee_wrist) / 2.0
+        # ee_pos = (ee_gripper + ee_wrist) / 2.0
         block_pos = self.data.site_xpos[self._block_sid].copy()
 
         d_ee_block     = float(np.linalg.norm(block_pos - ee_pos))
@@ -269,9 +267,9 @@ class BlockPickingEnv(MujocoEnv):
         else:
             r_reach     = (0.3 * (-d_ee_block) + np.exp(-20 * d_ee_block)) * REWARD_WEIGHTS["reach"]
             r_touch_gripper     = float(is_gripper_touching) * 0.5
-            r_touch_finder     = float(is_finger_touching) * 0.5
+            r_touch_finger     = float(is_finger_touching) * 0.5
             r_touch     = float(is_gripper_touching) * float(is_finger_touching) * 1.0
-            r_grasp     = float(is_grasping) * REWARD_WEIGHTS["grasp"]
+            r_grasp     = float(is_gripper_touching) * (1.0 - normalized_gripper_pos) * REWARD_WEIGHTS["grasp"]
             r_lift      = float(is_lifted)   * REWARD_WEIGHTS["lift"]
             r_transport = (-d_block_target   * REWARD_WEIGHTS["transport"]) if is_lifted else 0.0
             r_place     = float(is_success)  * REWARD_WEIGHTS["place"]
@@ -279,7 +277,7 @@ class BlockPickingEnv(MujocoEnv):
             # r_alive     = REWARD_WEIGHTS["alive"]
             r_ctrl      = float(np.linalg.norm(action - joint_pos[:6]) + np.linalg.norm(action-self.prev_action)) * REWARD_WEIGHTS["ctrl_penalty"]
 
-            reward = r_reach + r_grasp + r_lift + r_transport + r_place + r_success + r_ctrl + r_touch_gripper + r_touch_finder + r_touch
+            reward = r_reach + r_grasp + r_lift + r_transport + r_place + r_success + r_ctrl + r_touch_gripper + r_touch_finger + r_touch
             info = {
                 "r_reach":     r_reach,
                 "r_grasp":     r_grasp,
@@ -287,7 +285,7 @@ class BlockPickingEnv(MujocoEnv):
                 "r_transport": r_transport,
                 "r_place":     r_place,
                 "r_touch_gripper": r_touch_gripper,
-                "r_touch_finder": r_touch_finder,
+                "r_touch_finger": r_touch_finger,
                 "r_touch": r_touch,
             }
 
