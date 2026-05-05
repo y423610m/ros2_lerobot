@@ -148,7 +148,7 @@ def train(render: bool = False) -> SAC:
     Path(CONFIG["log_dir"]).mkdir(parents=True, exist_ok=True)
     Path(CONFIG["checkpoint_dir"]).mkdir(parents=True, exist_ok=True)
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cuda"
     print(f"Device: {device}  |  Envs: {CONFIG['n_envs']}  |  Steps: {CONFIG['total_timesteps']:,}")
 
     render_mode = "human" if render else None
@@ -238,6 +238,8 @@ def train(render: bool = False) -> SAC:
 def evaluate(checkpoint: str, n_episodes: int = 20, render: bool = True) -> None:
     vec_normalize_path = Path(checkpoint).parent / "vec_normalize_final.pkl"
 
+    CONFIG["max_episode_steps"] = 100000
+
     env = DummyVecEnv([lambda: Monitor(BlockPickingEnv(
         render_mode="human" if render else None,
         max_episode_steps=CONFIG["max_episode_steps"],
@@ -264,7 +266,7 @@ def evaluate(checkpoint: str, n_episodes: int = 20, render: bool = True) -> None
         while not done:
             action, _ = model.predict(obs, deterministic=True)
             obs, reward, done, info = env.step(action)
-            if render:
+            if render and ep_len%10==0:
                 env.render()
             ep_reward += float(reward[0])
             ep_len += 1

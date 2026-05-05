@@ -145,15 +145,24 @@ class BlockPickingEnv(MujocoEnv):
         self.data.qpos[self._blk_qpos_adr:self._blk_qpos_adr + 3] = [bx, by, bz]
         self.data.qpos[self._blk_qpos_adr + 3:self._blk_qpos_adr + 7] = [1, 0, 0, 0]
 
+        self.prev_action = init_qpos
+
         mujoco.mj_forward(self.model, self.data)
         return self._get_obs()
 
-    def step(self, action: np.ndarray):
-        action = np.clip(action, -1.0, 1.0)
+    def normalize_joint_values(self, raw_joint_pos: np.ndarray):
+        jnt_low  = np.array([self.model.jnt_range[jid, 0] for jid in self._joint_ids])
+        jnt_high = np.array([self.model.jnt_range[jid, 1] for jid in self._joint_ids])
+        normalized_joint_values = 2.0 * (raw_joint_pos - jnt_low) / (jnt_high - jnt_low) - 1.0
+        return normalized_joint_values
+
+    def unnormalize_joint_values(self, normalized_joint_values: np.ndarray):
         ctrl_low  = self.model.actuator_ctrlrange[:, 0]
         ctrl_high = self.model.actuator_ctrlrange[:, 1]
-        ctrl = ctrl_low + (action + 1.0) * 0.5 * (ctrl_high - ctrl_low)
-        self.do_simulation(ctrl, self.frame_skip)
+        return ctrl_low + (normalized_joint_values + 1.0) * 0.5 * (ctrl_high - ctrl_low)
+
+    def step(self, action: np.ndarray):
+        self.do_simulation(action, self.frame_skip)
         self._step_count += 1
 
         obs = self._get_obs()
@@ -171,10 +180,7 @@ class BlockPickingEnv(MujocoEnv):
     def _get_obs(self) -> np.ndarray:
         d, m = self.data, self.model
 
-        raw_joint_pos = np.array([d.qpos[m.jnt_qposadr[jid]] for jid in self._joint_ids])
-        jnt_low  = np.array([m.jnt_range[jid, 0] for jid in self._joint_ids])
-        jnt_high = np.array([m.jnt_range[jid, 1] for jid in self._joint_ids])
-        joint_pos = 2.0 * (raw_joint_pos - jnt_low) / (jnt_high - jnt_low) - 1.0
+        joint_pos = np.array([self.data.qpos[self.model.jnt_qposadr[jid]] for jid in self._joint_ids])
         joint_vel = np.array([d.qvel[m.jnt_dofadr[jid]]  for jid in self._joint_ids])
 
         # ee_pos  = d.site_xpos[self._ee_sid].copy()
@@ -247,19 +253,16 @@ class BlockPickingEnv(MujocoEnv):
         d_block_target = float(np.linalg.norm(block_pos - TARGET_POS))
         block_height   = float(block_pos[2] - TABLE_Z)
 
-        jid = self._joint_ids[5]
-        raw_gripper_pos = self.data.qpos[self.model.jnt_qposadr[jid]]  # gripper joint
-        jnt_low  = np.array(self.model.jnt_range[jid, 0])
-        jnt_high = np.array(self.model.jnt_range[jid, 1])
-        gripper_pos = 2.0 * (raw_gripper_pos - jnt_low) / (jnt_high - jnt_low) - 1.0
+        joint_pos = np.array([self.data.qpos[self.model.jnt_qposadr[jid]] for jid in self._joint_ids])
+        normalized_gripper_pos = self.normalize_joint_values(joint_pos)[5]
 
-        # is_grasping = d_ee_block < 0.02 and gripper_pos < 0.010
+        # is_grasping = d_ee_block < 0.02 and normalized_gripper_pos < 0.010
         is_gripper_touching = self._has_contact("gripper_geom", "block_geom")
         is_finger_touching = self._has_contact("moving_jaw_so101_v1_geom", "block_geom")   
-        is_grasping = is_gripper_touching and is_finger_touching and gripper_pos < 0.3
+        is_grasping = is_gripper_touching and is_finger_touching and normalized_gripper_pos < 0.3
         is_lifted   = block_height > LIFT_THRESHOLD
         is_success  = d_block_target < PLACE_THRESHOLD and block_height < LIFT_THRESHOLD + 0.01
-        # print(f"{is_gripper_touching=} {is_finger_touching=}  {gripper_pos=} {is_grasping=} {d_ee_block=} {block_height=}")
+        # print(f"{is_gripper_touching=} {is_finger_touching=}  {normalized_gripper_pos=} {is_grasping=} {d_ee_block=} {block_height=}")
         if self._reward_type == "sparse":
             reward = 1.0 if is_success else 0.0
             info: dict = {}
@@ -273,10 +276,10 @@ class BlockPickingEnv(MujocoEnv):
             r_transport = (-d_block_target   * REWARD_WEIGHTS["transport"]) if is_lifted else 0.0
             r_place     = float(is_success)  * REWARD_WEIGHTS["place"]
             r_success   = float(is_success)  * REWARD_WEIGHTS["success"]
-            r_alive     = REWARD_WEIGHTS["alive"]
-            r_ctrl      = float(np.sum(action ** 2)) * REWARD_WEIGHTS["ctrl_penalty"]
+            # r_alive     = REWARD_WEIGHTS["alive"]
+            r_ctrl      = float(np.linalg.norm(action - joint_pos[:6]) + np.linalg.norm(action-self.prev_action)) * REWARD_WEIGHTS["ctrl_penalty"]
 
-            reward = r_reach + r_grasp + r_lift + r_transport + r_place + r_success + r_alive + r_ctrl + r_touch_gripper + r_touch_finder + r_touch
+            reward = r_reach + r_grasp + r_lift + r_transport + r_place + r_success + r_ctrl + r_touch_gripper + r_touch_finder + r_touch
             info = {
                 "r_reach":     r_reach,
                 "r_grasp":     r_grasp,
@@ -292,11 +295,12 @@ class BlockPickingEnv(MujocoEnv):
             "ee_to_block":     d_ee_block,
             "block_to_target": d_block_target,
             "block_height":    block_height,
-            "gripper_pos":     float(gripper_pos),
+            "normalized_gripper_pos":     float(normalized_gripper_pos),
             "is_grasping":     bool(is_grasping),
             "is_lifted":       bool(is_lifted),
             "is_success":      bool(is_success),
         })
+        self.prev_action = action.copy()
         return float(reward), info
 
     @property
