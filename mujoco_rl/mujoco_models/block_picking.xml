@@ -61,7 +61,7 @@
     </body>
 
     <!-- Target zone (visual only) -->
-    <body name="target_zone" pos="-0.4 -0.2 0.825">
+    <body name="target_zone" pos="-0.4 -0.1 0.825">
       <geom name="target_vis" type="box" size="0.05 0.05 0.002"
             material="target_mat" contype="0" conaffinity="0"/>
     </body>
@@ -69,7 +69,7 @@
     <!-- Block -->
     <body name="block" pos="0.3 0 0.447">
       <freejoint name="block_joint"/>
-      <geom name="block_geom" type="box" size="0.024 0.024 0.024"
+      <geom name="block_geom" type="box" size="0.015 0.015 0.015"
             material="block_mat" mass="0.05" friction="1.5 0.5 0.5"/>
       <site name="block_site" pos="0 0 0" size="0.005"/>
     </body>

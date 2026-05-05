@@ -40,7 +40,7 @@ import IPython
 CONFIG: dict = {
     # Environment
     "n_envs":            32,
-    "max_episode_steps": 500,
+    "max_episode_steps": 200,
     # SAC
     "learning_rate":     3e-4,
     "buffer_size":       1_000_000,
@@ -164,6 +164,8 @@ def train(render: bool = False) -> SAC:
         reward_type="dense",
     ))])
     eval_env = VecNormalize(eval_env, norm_obs=True, norm_reward=False, clip_obs=10.0)
+    eval_env.training = False
+    eval_env.norm_reward = False
 
     model = SAC(
         policy="MlpPolicy",

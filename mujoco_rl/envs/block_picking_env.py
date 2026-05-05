@@ -51,7 +51,7 @@ REWARD_WEIGHTS: dict[str, float] = {
     "place":       10.0,
     "success":     50.0,
     "alive":        0.1,
-    "ctrl_penalty": -0.01,
+    "ctrl_penalty": -0.1,
 }
 
 
@@ -264,7 +264,7 @@ class BlockPickingEnv(MujocoEnv):
             reward = 1.0 if is_success else 0.0
             info: dict = {}
         else:
-            r_reach     = np.exp(-20 * d_ee_block) * REWARD_WEIGHTS["reach"]
+            r_reach     = (0.3 * (-d_ee_block) + np.exp(-20 * d_ee_block)) * REWARD_WEIGHTS["reach"]
             r_touch_gripper     = float(is_gripper_touching) * 0.5
             r_touch_finder     = float(is_finger_touching) * 0.5
             r_touch     = float(is_gripper_touching) * float(is_finger_touching) * 1.0
