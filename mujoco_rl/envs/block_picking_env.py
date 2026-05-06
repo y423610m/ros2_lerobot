@@ -113,6 +113,7 @@ class BlockPickingEnv(MujocoEnv):
         self._ee_sid    = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SITE, "gripperframe")
         self._ee_gripper_sid    = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SITE, "ee_gripper")
         self._ee_wrist_sid    = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SITE, "ee_wrist")
+        self._ee_wrist_base_sid    = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SITE, "ee_wrist_base")
         self._block_sid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SITE, "block_site")
 
         blk_jid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, "block_joint")
@@ -236,15 +237,27 @@ class BlockPickingEnv(MujocoEnv):
 
         return False
 
+    def _point_to_line_distance(self, A, B, C):
+        '''
+        distance between line AB and point C
+        '''
+        AB = B - A
+        AC = C - A
+
+        # Distance = |AB x AC| / |AB|
+        distance = np.linalg.norm(np.cross(AB, AC)) / np.linalg.norm(AB)
+        return distance
+
     # ------------------------------------------------------------------
     # Reward
     # ------------------------------------------------------------------
 
     def _compute_reward(self, action: np.ndarray) -> tuple[float, dict]:
-        ee_pos    = self.data.site_xpos[self._ee_sid].copy()
+        # ee_pos    = self.data.site_xpos[self._ee_sid].copy()
         ee_gripper = self.data.site_xpos[self._ee_gripper_sid].copy()
         ee_wrist = self.data.site_xpos[self._ee_wrist_sid].copy()
-        # ee_pos = (ee_gripper + ee_wrist) / 2.0
+        ee_wrist_base = self.data.site_xpos[self._ee_wrist_base_sid].copy()
+        ee_pos = (ee_gripper + ee_wrist) / 2.0
         block_pos = self.data.site_xpos[self._block_sid].copy()
 
         d_ee_block     = float(np.linalg.norm(block_pos - ee_pos))
@@ -256,8 +269,9 @@ class BlockPickingEnv(MujocoEnv):
 
         # is_grasping = d_ee_block < 0.02 and normalized_gripper_pos < 0.010
         is_gripper_touching = self._has_contact("gripper_geom", "block_geom")
-        is_finger_touching = self._has_contact("moving_jaw_so101_v1_geom", "block_geom")   
-        is_grasping = is_gripper_touching and is_finger_touching and normalized_gripper_pos < 0.3
+        is_finger_touching = self._has_contact("moving_jaw_so101_v1_geom", "block_geom")
+        is_grasping = is_gripper_touching and is_finger_touching and self._point_to_line_distance(ee_wrist, ee_gripper, block_pos) < 0.01
+        # is_grasping = is_gripper_touching and is_finger_touching and normalized_gripper_pos < 0.3
         is_lifted   = block_height > LIFT_THRESHOLD
         is_success  = d_block_target < PLACE_THRESHOLD and block_height < LIFT_THRESHOLD + 0.01
         # print(f"{is_gripper_touching=} {is_finger_touching=}  {normalized_gripper_pos=} {is_grasping=} {d_ee_block=} {block_height=}")
@@ -269,7 +283,7 @@ class BlockPickingEnv(MujocoEnv):
             r_touch_gripper     = float(is_gripper_touching) * 0.5
             r_touch_finger     = float(is_finger_touching) * 0.5
             r_touch     = float(is_gripper_touching) * float(is_finger_touching) * 1.0
-            r_grasp     = float(is_gripper_touching) * (1.0 - normalized_gripper_pos) * REWARD_WEIGHTS["grasp"]
+            r_grasp     = float(is_grasping) * (1) * (1.0 - normalized_gripper_pos) * REWARD_WEIGHTS["grasp"]
             r_lift      = float(is_lifted)   * REWARD_WEIGHTS["lift"]
             r_transport = (-d_block_target   * REWARD_WEIGHTS["transport"]) if is_lifted else 0.0
             r_place     = float(is_success)  * REWARD_WEIGHTS["place"]

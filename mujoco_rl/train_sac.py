@@ -4,7 +4,7 @@ SAC training script for block picking.
 Usage:
     uv run python train_sac.py                          # train with defaults
     uv run python train_sac.py --render                 # visualize during training
-    uv run python train_sac.py --timesteps 5000000       # quick test run
+    uv run python train_sac.py --timesteps 10000000       # quick test run
     uv run python train_sac.py --eval --render --checkpoint checkpoints/best_model
     
     uv run python -m mujoco.viewer --mjcf block_picking.xml
