@@ -11,6 +11,7 @@ log/
 models/
 logs/
 saved_models/
+checkpoints/
 
 # Python
 __pycache__/
