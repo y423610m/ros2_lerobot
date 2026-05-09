@@ -51,7 +51,7 @@ REWARD_WEIGHTS: dict[str, float] = {
     "place":       10.0,
     "success":     50.0,
     "alive":        0.1,
-    "ctrl_penalty": -5.0,
+    "ctrl_penalty": -0.1,
 }
 
 
@@ -289,8 +289,7 @@ class BlockPickingEnv(MujocoEnv):
             r_place     = float(is_success)  * REWARD_WEIGHTS["place"]
             r_success   = float(is_success)  * REWARD_WEIGHTS["success"]
             # r_alive     = REWARD_WEIGHTS["alive"]
-            r_ctrl      = np.linalg.norm(action-self.prev_action) * REWARD_WEIGHTS["ctrl_penalty"]
-            # r_ctrl      = float(np.linalg.norm(action - joint_pos[:6]) + np.linalg.norm(action-self.prev_action)) * REWARD_WEIGHTS["ctrl_penalty"]
+            r_ctrl      = float(np.linalg.norm(action - joint_pos[:6]) + np.linalg.norm(action-self.prev_action)) * REWARD_WEIGHTS["ctrl_penalty"]
 
             reward = r_reach + r_grasp + r_lift + r_transport + r_place + r_success + r_ctrl + r_touch_gripper + r_touch_finger + r_touch
             info = {
