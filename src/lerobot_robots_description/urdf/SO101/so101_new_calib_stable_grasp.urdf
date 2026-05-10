@@ -287,7 +287,7 @@
     <collision>
       <origin xyz="-0.014 0 -0.063" rpy="0 -0.1 0"/>
       <geometry>
-        <box size="0.005 0.02 0.07"/>
+        <box size="0.005 0.0175 0.07"/>
       </geometry>
     </collision>
     <!-- gripper_finger_collision_outer -->
@@ -392,7 +392,7 @@
     <collision>
       <origin xyz="-0.006 -0.04 0.0189" rpy="0 0 -0.08"/>
       <geometry>
-        <box size="0.005 0.07 0.02" xyz="0 0 0.1"/>
+        <box size="0.005 0.07 0.0175" xyz="0 0 0.1"/>
       </geometry>
     </collision>
     <!-- moving_jaw_collision_outer -->
