@@ -155,6 +155,10 @@ class SO101PickPlaceEnv:
         self.scene.build(n_envs=self.num_envs, env_spacing=(env_spacing, env_spacing))
 
         self.joint_pos_min, self.joint_pos_max = self.robot_entity.get_dofs_limit()
+        self.geom_idx_object = self.object_entity.geoms[0].idx
+        self.geom_idx_gripper_finger_collision_inner = self.robot_entity.get_link('gripper').geoms[0].idx
+        self.geom_idx_moving_jaw_collision_inner = self.robot_entity.get_link('moving_jaw_so101_v1').geoms[0].idx
+
 
         # Get joint indices (DOF indices for each joint)
         self.joint_indices = []
@@ -324,14 +328,22 @@ class SO101PickPlaceEnv:
 
         # === PHASE 1: APPROACH + GRASP ===
         # Reward for moving toward sponge
-        rewards_dict["dist_to_obj_rewards"] = -100.0 * dist_to_obj  # Move closer to sponge
+        rewards_dict["dist_to_obj_rewards"] = (0.3 * (-dist_to_obj) + torch.exp(-20.0*dist_to_obj)) * 1.0  # Move closer to sponge
 
         # grasp rewards
         # Gripper state (action[5]: +1 = open, -1 = closed)
+
+        is_gripper_touching = self._check_collision(self.geom_idx_object, self.geom_idx_gripper_finger_collision_inner)
+        is_finger_touching = self._check_collision(self.geom_idx_object, self.geom_idx_moving_jaw_collision_inner)
+        rewards_dict["is_gripper_touching"] = is_gripper_touching * 0.5
+        rewards_dict["is_finger_touching"] = is_finger_touching * 0.5
+        rewards_dict["is_touching"] = is_gripper_touching * is_finger_touching * 1.0
+        rewards_dict["is_grasping"] = is_gripper_touching * is_finger_touching * (1.0-obs["joint_pos"][:, 5]) * 2.0
+
         # Use -0.7 threshold to ensure gripper is sufficiently closed for grasping
-        gripper_closed = obs["joint_pos"][:, 5] < -0.3                        # True if sufficiently closed
-        gripper_grabbing = gripper_closed & (obs["joint_pos"][:, 5] > actions[:, 5]+0.1)
-        near_sponge = dist_to_obj < self.grasp_threshold
+        # gripper_closed = obs["joint_pos"][:, 5] < -0.3                        # True if sufficiently closed
+        # gripper_grabbing = gripper_closed & (obs["joint_pos"][:, 5] > actions[:, 5]+0.1)
+        # near_sponge = dist_to_obj < self.grasp_threshold
         # rewards_dict["close_gripper_near_sponge_rewards"] = 5.0 * (near_sponge).float() * torch.clamp(-obs["joint_pos"][:, 5], min=0.0) # close
         # rewards_dict["press_gripper_near_sponge_rewards"] = 5.0 * (near_sponge).float() * torch.clamp(obs["joint_pos"][:, 5]-actions[:, 5], min=0.0) # press
         # print(f"{near_sponge=}")
@@ -357,12 +369,12 @@ class SO101PickPlaceEnv:
         
         # Distance from sponge to container (XY only for placement)
         dist_xy = torch.norm(target_pos[:, :2] - obj_pos[:, :2], dim=-1)
-        rewards_dict["lift_sponge_to_container_xy_penalty"] = -10.0 * dist_xy * lifted_mask  # Move grasped sponge toward container
+        rewards_dict["lift_sponge_to_container_xy_penalty"] = 10.0 * (1.0-dist_xy) * lifted_mask  # Move grasped sponge toward container
         
         # Z distance (sponge should be at container height)
-        container_z = target_pos[:, 2]
-        dist_z = torch.abs(obj_pos[:, 2] - container_z)
-        rewards_dict["lift_sponge_to_container_z_penalty"] = -5.0 * dist_z * lifted_mask
+        # container_z = target_pos[:, 2]
+        # dist_z = torch.abs(obj_pos[:, 2] - container_z)
+        # rewards_dict["lift_sponge_to_container_z_penalty"] = -5.0 * dist_z * lifted_mask
         
         # Success bonus if sponge is inside container
         success = self._check_success(obs)
