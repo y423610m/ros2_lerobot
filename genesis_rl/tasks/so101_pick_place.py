@@ -259,7 +259,7 @@ class SO101PickPlaceEnv:
 
         # Compute
         obs = self._compute_observations()
-        rewards = self._compute_rewards(obs, actions)
+        rewards, reward_log = self._compute_rewards(obs, actions)
         dones = self._compute_terminations(obs)
 
         # Reset done envs
@@ -267,7 +267,7 @@ class SO101PickPlaceEnv:
             # IPython.embed()
             self.reset(torch.where(dones)[0])
 
-        info = {"success": self._check_success(obs)}
+        info = {"success": self._check_success(obs), "log": reward_log}
         return obs, rewards, dones, info
 
     def _compute_observations(self) -> torch.Tensor:
@@ -402,10 +402,13 @@ class SO101PickPlaceEnv:
         # print(f"{rewards_dict=}")
 
         rewards = torch.zeros(self.num_envs, device=self.device)
-        rewards = sum([rewards for reward_key, rewards in rewards_dict.items()])
+        rewards = sum([v for _, v in rewards_dict.items()])
+
+        # Detach individual rewards for logging via RSL-RL extras["log"] mechanism
+        reward_log = {key: value.detach().cpu() for key, value in rewards_dict.items()}
 
         self.prev_actions = actions.clone()
-        return rewards
+        return rewards, reward_log
 
     def _check_collision(self, idx_geom_a, idx_geom_b):
         if idx_geom_a > idx_geom_b:
