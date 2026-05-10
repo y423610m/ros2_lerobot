@@ -18,7 +18,7 @@ from rsl_rl.runners import OnPolicyRunner
 
 def evaluate(model_path: str, num_episodes: int = 10, show_viewer: bool = True):
     """Evaluate a trained policy."""
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cpu"
 
     # Load configs
     with open("config/env_config.yaml", "r") as f:
@@ -50,7 +50,7 @@ def evaluate(model_path: str, num_episodes: int = 10, show_viewer: bool = True):
         device=device,
     )
 
-    runner.load(model_path)
+    runner.load(model_path, map_location="cpu")
 
     # Run evaluation episodes
     successes = 0
@@ -79,6 +79,17 @@ def evaluate(model_path: str, num_episodes: int = 10, show_viewer: bool = True):
             print(f"{info=}")
             episode_reward += rewards.item()
             steps += 1
+
+            if 0:  # check collision
+                geom_idx_object = env.object_entity.geoms[0].idx
+                geom_idx_gripper_finger_collision_inner = env.robot_entity.get_link('gripper').geoms[0].idx
+                geom_idx_moving_jaw_collision_inner = env.robot_entity.get_link('moving_jaw_so101_v1').geoms[0].idx
+
+                res = env._check_collision(geom_idx_object, geom_idx_moving_jaw_collision_inner)
+                if res:
+                    IPython.embed()
+                    return
+
 
             if info["success"].item():
                 successes += 1
