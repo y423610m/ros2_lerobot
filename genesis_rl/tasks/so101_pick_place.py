@@ -405,7 +405,7 @@ class SO101PickPlaceEnv:
         rewards = sum([v for _, v in rewards_dict.items()])
 
         # Detach individual rewards for logging via RSL-RL extras["log"] mechanism
-        reward_log = {key: value.detach().cpu() for key, value in rewards_dict.items()}
+        reward_log = {key: value if isinstance(value, float) else value.detach().cpu() for key, value in rewards_dict.items()}
 
         self.prev_actions = actions.clone()
         return rewards, reward_log

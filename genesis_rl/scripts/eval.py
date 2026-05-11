@@ -18,7 +18,7 @@ from rsl_rl.runners import OnPolicyRunner
 
 def evaluate(model_path: str, num_episodes: int = 10, show_viewer: bool = True):
     """Evaluate a trained policy."""
-    device = "cpu"
+    device = "cuda"
 
     # Load configs
     with open("config/env_config.yaml", "r") as f:
