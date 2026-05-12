@@ -88,7 +88,7 @@ class BlockPickingEnv(MujocoEnv):
 
         super().__init__(
             model_path=str(XML_PATH),
-            frame_skip=10,          # 10 * 2ms = 20ms per step -> 50 fps
+            frame_skip=2,          # 2 * 10ms = 20ms per step -> 50 fps
             observation_space=observation_space,
             render_mode=render_mode,
         )
