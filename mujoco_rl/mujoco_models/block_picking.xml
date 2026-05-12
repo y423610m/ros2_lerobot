@@ -22,7 +22,7 @@
   <include file="../../src/lerobot_robots_description/urdf/SO101/so101_new_calib_stable_grasp.xml"/>
 
   <compiler angle="radian" autolimits="true"/>
-  <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast"/>
+  <option timestep="0.01" gravity="0 0 -9.81" integrator="implicitfast"/>
 
   <default>
     <joint armature="0.01" damping="1.0" limited="true"/>

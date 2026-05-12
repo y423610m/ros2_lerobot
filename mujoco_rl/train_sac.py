@@ -40,7 +40,7 @@ import IPython
 CONFIG: dict = {
     # Environment
     "n_envs":            32,
-    "max_episode_steps": 200,
+    "max_episode_steps": 500,
     # SAC
     "learning_rate":     3e-4,
     "buffer_size":       1_000_000,
