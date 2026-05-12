@@ -58,7 +58,7 @@ CONFIG: dict = {
     "total_timesteps":   2_000_000,
     "eval_freq":         2_000,
     "n_eval_episodes":   10,
-    "save_freq":         50_000,
+    "save_freq":         200_000,
     # Paths
     "log_dir":           "logs/",
     "checkpoint_dir":    "checkpoints/",

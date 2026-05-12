@@ -47,7 +47,7 @@ REWARD_WEIGHTS: dict[str, float] = {
     "reach":        1.0,
     "grasp":        3.0,
     "lift":         5.0,
-    "transport":    4.0,
+    "transport":    8.0,
     "place":       10.0,
     "success":     50.0,
     "alive":        0.1,
@@ -285,22 +285,22 @@ class BlockPickingEnv(MujocoEnv):
             r_touch     = float(is_gripper_touching) * float(is_finger_touching) * 1.0
             r_grasp     = float(is_grasping) * (1) * (1.0 - normalized_gripper_pos) * REWARD_WEIGHTS["grasp"]
             r_lift      = float(is_lifted)   * REWARD_WEIGHTS["lift"]
-            r_transport = ((0.4-d_block_target_xy) * REWARD_WEIGHTS["transport"]) if is_lifted else 0.0
+            r_transport = (0.3 * (-d_block_target_xy) + np.exp(-20 * d_block_target_xy)) * REWARD_WEIGHTS["transport"] if is_lifted else 0.0
             r_place     = float(is_success)  * REWARD_WEIGHTS["place"]
             r_success   = float(is_success)  * REWARD_WEIGHTS["success"]
             # r_alive     = REWARD_WEIGHTS["alive"]
             r_ctrl      = float(np.linalg.norm(action - joint_pos[:6]) + np.linalg.norm(action-self.prev_action)) * REWARD_WEIGHTS["ctrl_penalty"]
 
-            reward = r_reach + r_grasp + r_lift + r_transport + r_place + r_success + r_ctrl + r_touch_gripper + r_touch_finger + r_touch
+            reward = r_reach + r_touch_gripper + r_touch_finger + r_touch + r_grasp + r_lift + r_transport + r_place + r_success + r_ctrl 
             info = {
                 "r_reach":     r_reach,
+                "r_touch_gripper": r_touch_gripper,
+                "r_touch_finger": r_touch_finger,
+                "r_touch": r_touch,
                 "r_grasp":     r_grasp,
                 "r_lift":      r_lift,
                 "r_transport": r_transport,
                 "r_place":     r_place,
-                "r_touch_gripper": r_touch_gripper,
-                "r_touch_finger": r_touch_finger,
-                "r_touch": r_touch,
             }
 
         info.update({
