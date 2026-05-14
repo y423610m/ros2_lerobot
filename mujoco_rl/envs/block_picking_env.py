@@ -49,8 +49,8 @@ REWARD_WEIGHTS: dict[str, float] = {
     "lift":         5.0,
     "transport":    8.0,
     "place":       10.0,
-    "success":     50.0,
-    "alive":        0.1,
+    "success":     500.0,
+    "alive_penalty":-0.1,
     "ctrl_penalty": -0.1,
 }
 
@@ -272,8 +272,9 @@ class BlockPickingEnv(MujocoEnv):
         is_finger_touching = self._has_contact("moving_jaw_finger_collision_inner", "block_geom")
         is_grasping = is_gripper_touching and is_finger_touching and self._point_to_line_distance(ee_wrist, ee_gripper, block_pos) < 0.01
         # is_grasping = is_gripper_touching and is_finger_touching and normalized_gripper_pos < 0.3
-        is_lifted   = block_height > LIFT_THRESHOLD
-        is_success  = d_block_target_xy < PLACE_THRESHOLD and block_height < LIFT_THRESHOLD + 0.01
+        is_lifted   = block_height > LIFT_THRESHOLD and is_grasping
+        is_above_target = d_block_target_xy < PLACE_THRESHOLD
+        is_success  =  is_above_target and block_height < LIFT_THRESHOLD + 0.01 and not is_gripper_touching and not is_finger_touching
         # print(f"{is_gripper_touching=} {is_finger_touching=}  {normalized_gripper_pos=} {is_grasping=} {d_ee_block=} {block_height=}")
         if self._reward_type == "sparse":
             reward = 1.0 if is_success else 0.0
@@ -288,10 +289,10 @@ class BlockPickingEnv(MujocoEnv):
             r_transport = (0.3 * (-d_block_target_xy) + np.exp(-20 * d_block_target_xy)) * REWARD_WEIGHTS["transport"] if is_lifted else 0.0
             r_place     = float(is_success)  * REWARD_WEIGHTS["place"]
             r_success   = float(is_success)  * REWARD_WEIGHTS["success"]
-            # r_alive     = REWARD_WEIGHTS["alive"]
+            r_alive     = REWARD_WEIGHTS["_penalty"]
             r_ctrl      = float(np.linalg.norm(action - joint_pos[:6]) + np.linalg.norm(action-self.prev_action)) * REWARD_WEIGHTS["ctrl_penalty"]
 
-            reward = r_reach + r_touch_gripper + r_touch_finger + r_touch + r_grasp + r_lift + r_transport + r_place + r_success + r_ctrl 
+            reward = r_reach + r_touch_gripper + r_touch_finger + r_touch + r_grasp + r_lift + r_transport + r_place + r_success  + r_alive + r_ctrl
             info = {
                 "r_reach":     r_reach,
                 "r_touch_gripper": r_touch_gripper,
@@ -301,6 +302,7 @@ class BlockPickingEnv(MujocoEnv):
                 "r_lift":      r_lift,
                 "r_transport": r_transport,
                 "r_place":     r_place,
+                "r_ctrl": r_ctrl,
             }
 
         info.update({
