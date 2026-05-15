@@ -274,8 +274,9 @@ class BlockPickingEnv(MujocoEnv):
         # is_grasping = is_gripper_touching and is_finger_touching and normalized_gripper_pos < 0.3
         is_lifted   = block_height > LIFT_THRESHOLD and is_grasping
         is_above_target = d_block_target_xy < PLACE_THRESHOLD
-        is_success  =  is_above_target and block_height < LIFT_THRESHOLD + 0.01 and not is_gripper_touching and not is_finger_touching
-        # print(f"{is_gripper_touching=} {is_finger_touching=}  {normalized_gripper_pos=} {is_grasping=} {d_ee_block=} {block_height=}")
+        is_success  =  is_above_target and (block_height < LIFT_THRESHOLD + 0.01) and not is_gripper_touching and not is_finger_touching
+        # print(f"{is_gripper_touching=} {is_finger_touching=}  {normalized_gripper_pos=} {is_grasping=} {d_ee_block=} {block_height=} {is_above_target=} {LIFT_THRESHOLD-block_height}")
+        # print(f"{block_height-LIFT_THRESHOLD}")
         if self._reward_type == "sparse":
             reward = 1.0 if is_success else 0.0
             info: dict = {}
