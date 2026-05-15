@@ -56,9 +56,9 @@ CONFIG: dict = {
     "net_arch":          [256, 256, 256],
     # Schedule
     "total_timesteps":   2_000_000,
-    "eval_freq":         200_000,
+    "eval_freq":         500_000,
     "n_eval_episodes":   10,
-    "save_freq":         200_000,
+    "save_freq":         500_000,
     # Paths
     "log_dir":           "logs/",
     "checkpoint_dir":    "checkpoints/",
