@@ -148,7 +148,7 @@ def train(render: bool = False) -> SAC:
     Path(CONFIG["log_dir"]).mkdir(parents=True, exist_ok=True)
     Path(CONFIG["checkpoint_dir"]).mkdir(parents=True, exist_ok=True)
 
-    device = "cuda"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Device: {device}  |  Envs: {CONFIG['n_envs']}  |  Steps: {CONFIG['total_timesteps']:,}")
 
     render_mode = "human" if render else None
