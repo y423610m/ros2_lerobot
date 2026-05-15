@@ -48,6 +48,7 @@ REWARD_WEIGHTS: dict[str, float] = {
     "grasp":        3.0,
     "lift":         5.0,
     "transport":    8.0,
+    "release":     10.0,
     "place":       10.0,
     "success":     500.0,
     "alive_penalty":-0.1,
@@ -272,10 +273,11 @@ class BlockPickingEnv(MujocoEnv):
         is_finger_touching = self._has_contact("moving_jaw_finger_collision_inner", "block_geom")
         is_grasping = is_gripper_touching and is_finger_touching and self._point_to_line_distance(ee_wrist, ee_gripper, block_pos) < 0.01
         # is_grasping = is_gripper_touching and is_finger_touching and normalized_gripper_pos < 0.3
-        is_lifted   = block_height > LIFT_THRESHOLD and is_grasping
+        is_lifted   = (block_height > LIFT_THRESHOLD) and is_grasping
         is_above_target = d_block_target_xy < PLACE_THRESHOLD
-        is_success  =  is_above_target and block_height < LIFT_THRESHOLD + 0.01 and not is_gripper_touching and not is_finger_touching
-        # print(f"{is_gripper_touching=} {is_finger_touching=}  {normalized_gripper_pos=} {is_grasping=} {d_ee_block=} {block_height=}")
+        is_success  =  is_above_target and (block_height < LIFT_THRESHOLD + 0.01) and not is_gripper_touching and not is_finger_touching
+        # print(f"{is_gripper_touching=} {is_finger_touching=}  {normalized_gripper_pos=} {is_grasping=} {d_ee_block=} {block_height=} {is_above_target=} {LIFT_THRESHOLD-block_height}")
+        print(f"{block_height-LIFT_THRESHOLD}")
         if self._reward_type == "sparse":
             reward = 1.0 if is_success else 0.0
             info: dict = {}
@@ -284,11 +286,12 @@ class BlockPickingEnv(MujocoEnv):
             r_touch_gripper     = float(is_gripper_touching) * 0.5
             r_touch_finger     = float(is_finger_touching) * 0.5
             r_touch     = float(is_gripper_touching) * float(is_finger_touching) * 1.0
-            r_grasp     = float(is_grasping) * (1) * (1.0 - normalized_gripper_pos) * REWARD_WEIGHTS["grasp"]
+            r_grasp     = float(is_grasping) * float(not is_above_target) * (1.0 - normalized_gripper_pos) * REWARD_WEIGHTS["grasp"]
             r_lift      = float(is_lifted)   * REWARD_WEIGHTS["lift"]
             r_transport = (0.3 * (-d_block_target_xy) + np.exp(-20 * d_block_target_xy)) * REWARD_WEIGHTS["transport"] if is_lifted else 0.0
-            r_place     = float(is_success)  * REWARD_WEIGHTS["place"]
-            r_success   = float(is_success)  * REWARD_WEIGHTS["success"]
+            r_release   = float(is_grasping) * float(is_above_target) * (normalized_gripper_pos - 1.0) * REWARD_WEIGHTS["release"]
+            r_place     = float(is_success) * REWARD_WEIGHTS["place"]
+            r_success   = float(is_success) * REWARD_WEIGHTS["success"]
             r_alive     = REWARD_WEIGHTS["alive_penalty"]
             r_ctrl      = float(np.linalg.norm(action - joint_pos[:6]) + np.linalg.norm(action-self.prev_action)) * REWARD_WEIGHTS["ctrl_penalty"]
 
@@ -301,6 +304,7 @@ class BlockPickingEnv(MujocoEnv):
                 "r_grasp":     r_grasp,
                 "r_lift":      r_lift,
                 "r_transport": r_transport,
+                "r_release": r_release,
                 "r_place":     r_place,
                 "r_ctrl": r_ctrl,
             }
@@ -313,6 +317,7 @@ class BlockPickingEnv(MujocoEnv):
             "is_grasping":     bool(is_grasping),
             "is_lifted":       bool(is_lifted),
             "is_success":      bool(is_success),
+            "is_above_target": bool(is_above_target),
         })
         self.prev_action = action.copy()
         return float(reward), info
