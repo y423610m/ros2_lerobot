@@ -236,7 +236,8 @@ def train(render: bool = False) -> SAC:
 
 
 def evaluate(checkpoint: str, n_episodes: int = 20, render: bool = True) -> None:
-    vec_normalize_path = Path(checkpoint).parent / "vec_normalize_final.pkl"
+    # vec_normalize_path = Path(checkpoint).parent / "vec_normalize_final.pkl"
+    vec_normalize_path = Path(checkpoint.replace("sac_", "sac_vecnormalize_").replace(".zip", ".pkl"))
 
     CONFIG["max_episode_steps"] = 100000
 
@@ -259,6 +260,7 @@ def evaluate(checkpoint: str, n_episodes: int = 20, render: bool = True) -> None
     rewards, lengths, successes = [], [], []
     for ep in range(n_episodes):
         obs = env.reset()
+        env.envs[0].env.mujoco_renderer.viewer.cam.lookat[:] = [-0.2, 0.2, 0.5]
         done = False
         ep_reward = 0.0
         ep_len = 0
