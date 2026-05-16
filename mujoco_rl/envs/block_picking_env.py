@@ -28,6 +28,7 @@ Action space (6-dim, continuous [-1, 1]):
 
 from __future__ import annotations
 
+from enum import IntEnum
 from pathlib import Path
 
 import mujoco
@@ -45,16 +46,27 @@ LIFT_THRESHOLD = 0.05
 PLACE_THRESHOLD = 0.04
 MAX_FINGER_SLIDE = 0.040
 
+
+class Phase(IntEnum):
+    APPROACH = 0
+    GRASP    = 1
+    LIFT     = 2
+    TRANSFER = 3
+    DESCEND  = 4
+    RELEASE  = 5
+
+
 REWARD_WEIGHTS: dict[str, float] = {
-    "reach":        1.0,
-    "grasp":        3.0,
-    "lift":         5.0,
-    "transport":    8.0,
-    "release":     10.0,
-    "place":       10.0,
-    "success":     500.0,
-    "alive_penalty":-0.5,
-    "ctrl_penalty": -0.1,
+    "phase_progress": 2.0,    # base bonus = 2 * phase_idx -> 0,2,4,6,8,10
+    "reach":           1.0,
+    "grasp":           3.0,
+    "lift":           50.0,   # block_height (m) * 50 -> peak ~ 5 at LIFT_THRESHOLD
+    "transport":       8.0,
+    "descend":        10.0,
+    "release":        10.0,
+    "success":       500.0,
+    "alive_penalty":  -0.5,
+    "ctrl_penalty":   -0.1,
 }
 
 
@@ -165,6 +177,7 @@ class BlockPickingEnv(MujocoEnv):
         self.data.qpos[self._blk_qpos_adr + 3:self._blk_qpos_adr + 7] = [1, 0, 0, 0]
 
         self.prev_action = np.zeros(6, dtype=np.float32)
+        self._phase = Phase.APPROACH
 
         mujoco.mj_forward(self.model, self.data)
         return self._get_obs()
@@ -286,68 +299,101 @@ class BlockPickingEnv(MujocoEnv):
     # Reward
     # ------------------------------------------------------------------
 
+    def _update_phase(
+        self,
+        is_grasping: bool,
+        is_lifted: bool,
+        is_above_target: bool,
+        is_gripper_touching: bool,
+        is_finger_touching: bool,
+        block_height: float,
+    ) -> None:
+        p = self._phase
+
+        # Recovery: lost grip mid-transport -> restart from APPROACH
+        if p in (Phase.LIFT, Phase.TRANSFER, Phase.DESCEND) and not is_grasping:
+            self._phase = Phase.APPROACH
+            return
+
+        # Forward transitions
+        if p == Phase.APPROACH and is_gripper_touching and is_finger_touching:
+            self._phase = Phase.GRASP
+        elif p == Phase.GRASP and is_grasping and is_lifted:
+            self._phase = Phase.LIFT
+        elif p == Phase.LIFT and is_lifted and not is_above_target:
+            self._phase = Phase.TRANSFER
+        elif p == Phase.TRANSFER and is_above_target:
+            self._phase = Phase.DESCEND
+        elif p == Phase.DESCEND and is_above_target and block_height < LIFT_THRESHOLD + 0.03:
+            self._phase = Phase.RELEASE
+
     def _compute_reward(self, action: np.ndarray) -> tuple[float, dict]:
-        # ee_pos    = self.data.site_xpos[self._ee_sid].copy()
         ee_gripper = self.data.site_xpos[self._ee_gripper_sid].copy()
         ee_wrist = self.data.site_xpos[self._ee_wrist_sid].copy()
-        ee_wrist_base = self.data.site_xpos[self._ee_wrist_base_sid].copy()
         ee_pos = (ee_gripper + ee_wrist) / 2.0
         block_pos = self.data.site_xpos[self._block_sid].copy()
 
-        d_ee_block     = float(np.linalg.norm(block_pos - ee_pos))
+        d_ee_block        = float(np.linalg.norm(block_pos - ee_pos))
         d_block_target_xy = float(np.linalg.norm(block_pos[:2] - TARGET_POS[:2]))
-        block_height   = float(block_pos[2] - TABLE_Z)
+        d_block_target_3d = float(np.linalg.norm(block_pos - TARGET_POS))
+        block_height      = float(block_pos[2] - TABLE_Z)
 
         joint_pos = np.array([self.data.qpos[self.model.jnt_qposadr[jid]] for jid in self._joint_ids])
         normalized_gripper_pos = self.normalize_joint_values(joint_pos)[5]
 
-        # is_grasping = d_ee_block < 0.02 and normalized_gripper_pos < 0.010
         is_gripper_touching = self._has_contact("gripper_finger_collision_inner", "block_geom")
-        is_finger_touching = self._has_contact("moving_jaw_finger_collision_inner", "block_geom")
-        is_grasping = is_gripper_touching and is_finger_touching and self._point_to_line_distance(ee_wrist, ee_gripper, block_pos) < 0.01
-        # is_lifted is height-only so transport/lift shaping doesn't collapse
-        # the instant the gripper opens above the target.
-        is_lifted   = block_height > LIFT_THRESHOLD
+        is_finger_touching  = self._has_contact("moving_jaw_finger_collision_inner", "block_geom")
+        is_grasping = (
+            is_gripper_touching
+            and is_finger_touching
+            and self._point_to_line_distance(ee_wrist, ee_gripper, block_pos) < 0.01
+        )
+        is_lifted       = block_height > LIFT_THRESHOLD
         is_above_target = d_block_target_xy < PLACE_THRESHOLD
-        # Widened placement height window from 1cm to 3cm for robustness.
-        is_success  =  is_above_target and (block_height < LIFT_THRESHOLD + 0.03) and not is_gripper_touching and not is_finger_touching
-        # print(f"{is_gripper_touching=} {is_finger_touching=}  {normalized_gripper_pos=} {is_grasping=} {d_ee_block=} {block_height=} {is_above_target=} {LIFT_THRESHOLD-block_height}")
-        # print(f"{block_height-LIFT_THRESHOLD}")
+        is_success      = (
+            is_above_target
+            and (block_height < LIFT_THRESHOLD + 0.03)
+            and not is_gripper_touching
+            and not is_finger_touching
+        )
+
         if self._reward_type == "sparse":
             reward = 1.0 if is_success else 0.0
             info: dict = {}
         else:
-            r_reach     = (0.3 * (-d_ee_block) + np.exp(-20 * d_ee_block)) * REWARD_WEIGHTS["reach"]
-            r_touch_gripper     = float(is_gripper_touching) * 0.5
-            r_touch_finger     = float(is_finger_touching) * 0.5
-            r_touch     = float(is_gripper_touching) * float(is_finger_touching) * 1.0
-            # Zero out holding rewards once above target so they don't
-            # outcompete the release incentive over a long episode.
-            r_grasp     = float(is_grasping) * float(not is_above_target) * (1.0 - normalized_gripper_pos) * REWARD_WEIGHTS["grasp"]
-            r_lift      = float(is_lifted) * float(not is_above_target) * REWARD_WEIGHTS["lift"]
-            r_transport = (0.3 * (-d_block_target_xy) + np.exp(-20 * d_block_target_xy)) * REWARD_WEIGHTS["transport"] if (is_lifted and not is_above_target) else 0.0
-            # Once above target XY, shape descent toward TARGET_POS in 3D.
-            d_block_target_3d = float(np.linalg.norm(block_pos - TARGET_POS))
-            r_descend   = float(is_above_target) * np.exp(-20 * d_block_target_3d) * REWARD_WEIGHTS["transport"]
-            r_release   = float(is_above_target) * (normalized_gripper_pos + 1.0) * REWARD_WEIGHTS["release"]
-            r_success   = float(is_success) * REWARD_WEIGHTS["success"]
-            r_alive     = REWARD_WEIGHTS["alive_penalty"]
-            # Only penalize action smoothness (action - prev_action); comparing
-            # action [-1,1] to joint_pos [rad] was a scale mismatch.
-            r_ctrl      = float(np.linalg.norm(action - self.prev_action)) * REWARD_WEIGHTS["ctrl_penalty"]
+            self._update_phase(
+                is_grasping, is_lifted, is_above_target,
+                is_gripper_touching, is_finger_touching, block_height,
+            )
+            phase = self._phase
 
-            reward = r_reach + r_touch_gripper + r_touch_finger + r_touch + r_grasp + r_lift + r_transport + r_descend + r_release + r_success + r_alive + r_ctrl
+            r_progress = int(phase) * REWARD_WEIGHTS["phase_progress"]
+
+            if phase == Phase.APPROACH:
+                r_shape = (0.3 * (-d_ee_block) + np.exp(-20 * d_ee_block)) * REWARD_WEIGHTS["reach"]
+            elif phase == Phase.GRASP:
+                r_shape = (1.0 - normalized_gripper_pos) * REWARD_WEIGHTS["grasp"]
+            elif phase == Phase.LIFT:
+                r_shape = block_height * REWARD_WEIGHTS["lift"]
+            elif phase == Phase.TRANSFER:
+                r_shape = np.exp(-20 * d_block_target_xy) * REWARD_WEIGHTS["transport"]
+            elif phase == Phase.DESCEND:
+                r_shape = np.exp(-20 * d_block_target_3d) * REWARD_WEIGHTS["descend"]
+            elif phase == Phase.RELEASE:
+                r_shape = (normalized_gripper_pos + 1.0) * REWARD_WEIGHTS["release"]
+            else:
+                r_shape = 0.0
+
+            r_success = float(is_success) * REWARD_WEIGHTS["success"]
+            r_alive   = REWARD_WEIGHTS["alive_penalty"]
+            r_ctrl    = float(np.linalg.norm(action - self.prev_action)) * REWARD_WEIGHTS["ctrl_penalty"]
+
+            reward = r_progress + float(r_shape) + r_success + r_alive + r_ctrl
             info = {
-                "r_reach":     r_reach,
-                "r_touch_gripper": r_touch_gripper,
-                "r_touch_finger": r_touch_finger,
-                "r_touch": r_touch,
-                "r_grasp":     r_grasp,
-                "r_lift":      r_lift,
-                "r_transport": r_transport,
-                "r_descend":   r_descend,
-                "r_release":   r_release,
-                "r_ctrl":      r_ctrl,
+                "phase":      int(phase),
+                "r_progress": float(r_progress),
+                "r_shape":    float(r_shape),
+                "r_ctrl":     float(r_ctrl),
             }
 
         info.update({
