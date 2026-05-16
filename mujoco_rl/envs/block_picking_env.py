@@ -60,7 +60,7 @@ REWARD_WEIGHTS: dict[str, float] = {
     "phase_progress": 2.0,    # base bonus = 2 * phase_idx -> 0,2,4,6,8,10
     "reach":           1.0,
     "grasp":           3.0,
-    "lift":           50.0,   # block_height (m) * 50 -> peak ~ 5 at LIFT_THRESHOLD
+    "lift":            5.0,
     "transport":       8.0,
     "descend":        10.0,
     "release":        10.0,
@@ -410,7 +410,7 @@ class BlockPickingEnv(MujocoEnv):
                 r_touch_finger = float(is_finger_touching) * 0.5
                 r_touch = float(is_gripper_touching) * float(is_finger_touching) * 1.0
                 r_grasp     = float(is_grasping) * float(not is_above_target) * (1.0 - normalized_gripper_pos) * REWARD_WEIGHTS["grasp"]
-                r_lift      = float(is_lifted) * float(not is_above_target) * REWARD_WEIGHTS["lift"]
+                r_lift      = min(block_height, LIFT_THRESHOLD) * REWARD_WEIGHTS["lift"]
                 # r_shape = block_height * REWARD_WEIGHTS["lift"]
             elif phase == Phase.TRANSFER:
                 r_reach = (0.3 * (-d_ee_block) + np.exp(-20 * d_ee_block)) * REWARD_WEIGHTS["reach"]
@@ -418,7 +418,7 @@ class BlockPickingEnv(MujocoEnv):
                 r_touch_finger = float(is_finger_touching) * 0.5
                 r_touch = float(is_gripper_touching) * float(is_finger_touching) * 1.0
                 r_grasp     = float(is_grasping) * float(not is_above_target) * (1.0 - normalized_gripper_pos) * REWARD_WEIGHTS["grasp"]
-                r_lift      = float(is_lifted) * float(not is_above_target) * REWARD_WEIGHTS["lift"]
+                r_lift      = min(block_height, LIFT_THRESHOLD) * REWARD_WEIGHTS["lift"]
                 r_transport = (0.3 * (-d_block_target_xy) + np.exp(-20 * d_block_target_xy)) * REWARD_WEIGHTS["transport"]
                 # r_shape = np.exp(-20 * d_block_target_xy) * REWARD_WEIGHTS["transport"]
             elif phase == Phase.DESCEND:
