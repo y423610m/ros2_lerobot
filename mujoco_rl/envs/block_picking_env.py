@@ -298,7 +298,7 @@ class BlockPickingEnv(MujocoEnv):
             r_transport = (0.3 * (-d_block_target_xy) + np.exp(-20 * d_block_target_xy)) * REWARD_WEIGHTS["transport"] if (is_lifted and not is_above_target) else 0.0
             # Once above target XY, shape descent toward TARGET_POS in 3D.
             d_block_target_3d = float(np.linalg.norm(block_pos - TARGET_POS))
-            r_descend   = float(is_above_target) * np.exp(-20 * d_block_target_3d) * REWARD_WEIGHTS["transport"]
+            r_descend   = 0.0 # float(is_above_target) * np.exp(-20 * d_block_target_3d) * REWARD_WEIGHTS["transport"]
             r_release   = float(is_above_target) * (normalized_gripper_pos + 1.0) * REWARD_WEIGHTS["release"]
             r_success   = float(is_success) * REWARD_WEIGHTS["success"]
             r_alive     = REWARD_WEIGHTS["alive_penalty"]
