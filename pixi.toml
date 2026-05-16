@@ -14,6 +14,8 @@ view-so101-follower = "ros2 launch lerobot_robots_bringup view_follower.launch.p
 view-so101-leader = "ros2 launch lerobot_robots_description view_leader.launch.py"
 run-gazebo-so101-follower = "ros2 launch lerobot_robots_bringup so101_gazebo.launch.py"
 
+train-mujoco = "cd $PIXI_PROJECT_ROOT/mujoco_rl && uv run python train_sac.py --timesteps ${TS:-50000000}"
+
 tensorboard-mujoco = "pixi run tensorboard --logdir mujoco_rl/logs/ --host 0.0.0.0"
 tensorboard-genesis = "pixi run tensorboard --logdir genesis_rl/logs/ --host 0.0.0.0 --port 6007"
 
