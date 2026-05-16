@@ -274,8 +274,7 @@ class BlockPickingEnv(MujocoEnv):
         # is_grasping = d_ee_block < 0.02 and normalized_gripper_pos < 0.010
         is_gripper_touching = self._has_contact("gripper_finger_collision_inner", "block_geom")
         is_finger_touching = self._has_contact("moving_jaw_finger_collision_inner", "block_geom")
-        # Point-to-line check removed: contact alone is sufficient and more stable.
-        is_grasping = is_gripper_touching and is_finger_touching
+        is_grasping = is_gripper_touching and is_finger_touching and self._point_to_line_distance(ee_wrist, ee_gripper, block_pos) < 0.01
         # is_lifted is height-only so transport/lift shaping doesn't collapse
         # the instant the gripper opens above the target.
         is_lifted   = block_height > LIFT_THRESHOLD
