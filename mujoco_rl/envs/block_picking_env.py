@@ -37,6 +37,8 @@ from gymnasium.envs.mujoco import MujocoEnv
 
 XML_PATH = Path(__file__).parent.parent / "mujoco_models" / "block_picking.xml"
 
+CAM_H, CAM_W = 64, 64
+
 TARGET_POS = np.array([-0.4, -0.1, 0.84], dtype=np.float64)
 TABLE_Z = 0.825
 LIFT_THRESHOLD = 0.05
@@ -75,17 +77,27 @@ class BlockPickingEnv(MujocoEnv):
         max_episode_steps: int = 500,
         random_block_pos: bool = True,
         reward_type: str = "dense",
+        use_cameras: bool = False,
     ):
         self._max_episode_steps = max_episode_steps
         self._random_block_pos = random_block_pos
         self._reward_type = reward_type
+        self._use_cameras = use_cameras
         self._step_count = 0
         self._success_count = 0
         self._episode_count = 0
 
-        observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(25,), dtype=np.float32
-        )
+        if use_cameras:
+            observation_space = spaces.Dict({
+                "state":    spaces.Box(-np.inf, np.inf, shape=(25,), dtype=np.float32),
+                "proprio":  spaces.Box(-np.inf, np.inf, shape=(12,), dtype=np.float32),
+                "overview": spaces.Box(0, 255, shape=(CAM_H, CAM_W, 3), dtype=np.uint8),
+                "hand_eye": spaces.Box(0, 255, shape=(CAM_H, CAM_W, 3), dtype=np.uint8),
+            })
+        else:
+            observation_space = spaces.Box(
+                low=-np.inf, high=np.inf, shape=(25,), dtype=np.float32
+            )
 
         super().__init__(
             model_path=str(XML_PATH),
@@ -95,6 +107,10 @@ class BlockPickingEnv(MujocoEnv):
         )
 
         self._cache_ids()
+
+        if use_cameras:
+            self._cam_overview = mujoco.Renderer(self.model, height=CAM_H, width=CAM_W)
+            self._cam_hand_eye = mujoco.Renderer(self.model, height=CAM_H, width=CAM_W)
 
     def _cache_ids(self) -> None:
         m = self.model
@@ -180,7 +196,7 @@ class BlockPickingEnv(MujocoEnv):
         info["success_rate"] = self._success_count / max(1, self._episode_count)
         return obs, reward, terminated, truncated, info
 
-    def _get_obs(self) -> np.ndarray:
+    def _get_obs(self):
         d, m = self.data, self.model
 
         joint_pos = np.array([self.data.qpos[self.model.jnt_qposadr[jid]] for jid in self._joint_ids])
@@ -200,7 +216,7 @@ class BlockPickingEnv(MujocoEnv):
         ee_to_block     = block_pos - ee_pos
         block_to_target = np.array([np.linalg.norm(TARGET_POS - block_pos)])
 
-        return np.concatenate([
+        state = np.concatenate([
             joint_pos,        # 6
             joint_vel,        # 6
             ee_pos,           # 3
@@ -210,6 +226,20 @@ class BlockPickingEnv(MujocoEnv):
             ee_to_block,      # 3
             block_to_target,  # 1
         ]).astype(np.float32)
+
+        if not self._use_cameras:
+            return state
+
+        self._cam_overview.update_scene(self.data, camera="overview")
+        overview = self._cam_overview.render()
+        self._cam_hand_eye.update_scene(self.data, camera="hand_eye")
+        hand_eye = self._cam_hand_eye.render()
+        return {
+            "state":    state,          # critic uses this (privileged)
+            "proprio":  state[:12],     # joint_pos + joint_vel for actor
+            "overview": overview,
+            "hand_eye": hand_eye,
+        }
 
     def _has_contact(self, geom_a_name: str, geom_b_name: str) -> bool:
         """
