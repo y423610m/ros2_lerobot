@@ -60,7 +60,7 @@ REWARD_WEIGHTS: dict[str, float] = {
     "phase_progress": 2.0,    # base bonus = 2 * phase_idx -> 0,2,4,6,8,10
     "reach":           1.0,
     "grasp":           3.0,
-    "lift":            5.0,
+    "lift":           50.0,   # multiplyer to LIFT_THRESHOLD(=0.05)
     "transport":       8.0,
     "descend":        10.0,
     "release":        10.0,
