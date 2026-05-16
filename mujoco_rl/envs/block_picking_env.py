@@ -336,7 +336,7 @@ class BlockPickingEnv(MujocoEnv):
         elif p == Phase.DESCEND:
             if not is_above_target:
                 self._phase = Phase.TRANSFER
-            elif block_height < LIFT_THRESHOLD + 0.03:
+            elif block_height + 0.01 < LIFT_THRESHOLD:
                 self._phase = Phase.RELEASE
 
     def _compute_reward(self, action: np.ndarray) -> tuple[float, dict]:
