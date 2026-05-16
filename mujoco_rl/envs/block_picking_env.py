@@ -293,9 +293,8 @@ class BlockPickingEnv(MujocoEnv):
             r_touch     = float(is_gripper_touching) * float(is_finger_touching) * 1.0
             # Zero out holding rewards once above target so they don't
             # outcompete the release incentive over a long episode.
-            _holding_scale = 0.0 if is_above_target else 1.0
-            r_grasp     = float(is_grasping) * (1.0 - normalized_gripper_pos) * REWARD_WEIGHTS["grasp"] * _holding_scale
-            r_lift      = float(is_lifted)   * REWARD_WEIGHTS["lift"] * _holding_scale
+            r_grasp     = float(is_grasping) * float(not is_above_target) * (1.0 - normalized_gripper_pos) * REWARD_WEIGHTS["grasp"]
+            r_lift      = float(is_lifted) * float(not is_above_target) * REWARD_WEIGHTS["lift"]
             r_transport = (0.3 * (-d_block_target_xy) + np.exp(-20 * d_block_target_xy)) * REWARD_WEIGHTS["transport"] if (is_lifted and not is_above_target) else 0.0
             # Reward opening the gripper whenever the block is above the target
             # (no is_lifted gate -- that was preventing the release signal from
