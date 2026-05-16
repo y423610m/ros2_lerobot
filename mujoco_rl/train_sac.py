@@ -223,7 +223,7 @@ def train(render: bool = False) -> SAC:
     print(f"Training complete in {elapsed / 3600:.2f}h")
 
     model.save(f"{CONFIG['checkpoint_dir']}/sac_final")
-    vec_env.save(f"{CONFIG['checkpoint_dir']}/vec_normalize_final.pkl")
+    vec_env.save(f"{CONFIG['checkpoint_dir']}/sac_vecnormalize_final.pkl")
 
     vec_env.close()
     eval_env.close()
