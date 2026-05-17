@@ -478,19 +478,25 @@ class BlockPickingEnv(MujocoEnv):
                 r_touch_finger = float(not is_finger_touching) * 0.5  # during release, gripper should not touch object
                 r_touch = float(not is_gripper_touching) * float(not is_finger_touching) * 1.0  # during release, gripper should not touch object
                 r_release = (normalized_gripper_pos + 1.0) * REWARD_WEIGHTS["release"]
-                r_placement_accuracy = np.exp(-20 * d_block_target_3d) * REWARD_WEIGHTS["placement_accuracy"]
+                # Flat full reward once the block is inside the container; outside,
+                # the exp gradient nudges the block back toward the opening.
+                r_placement_accuracy = REWARD_WEIGHTS["placement_accuracy"] if is_block_in_container \
+                    else np.exp(-20 * d_block_target_3d) * REWARD_WEIGHTS["placement_accuracy"]
             elif phase == Phase.ESCAPE:
                 # Gripper must clear the container rim, not just the table top.
                 ee_above_rim = max(0.0, float(ee_pos[2] - (TABLE_Z + CONTAINER_RIM_HEIGHT)))
                 r_escape = min(ee_above_rim, ESCAPE_THRESHOLD) * REWARD_WEIGHTS["escape"]
-                r_placement_accuracy = np.exp(-20 * d_block_target_3d) * REWARD_WEIGHTS["placement_accuracy"]
+                # Flat full reward once the block is inside the container; outside,
+                # the exp gradient nudges the block back toward the opening.
+                r_placement_accuracy = REWARD_WEIGHTS["placement_accuracy"] if is_block_in_container \
+                    else np.exp(-20 * d_block_target_3d) * REWARD_WEIGHTS["placement_accuracy"]
             else:
                 # r_shape = 0.0
                 pass
 
-            # Precision-scaled success: full bonus at center, decays away from it.
-            precision = np.exp(-50 * d_block_target_xy)
-            r_success = float(is_success) * REWARD_WEIGHTS["success"] * precision
+            # Container catches the block — anywhere inside counts equally,
+            # so no precision scaling on the success bonus.
+            r_success = float(is_success) * REWARD_WEIGHTS["success"]
             r_alive   = REWARD_WEIGHTS["alive_penalty"]
             r_ctrl    = float(np.linalg.norm(action - self.prev_action)) * REWARD_WEIGHTS["ctrl_penalty"]
             reward = r_progress + r_reach + r_touch_gripper + r_touch_finger + r_touch + r_grasp + r_lift + r_transport + r_descend + r_release + r_escape + r_placement_accuracy + r_success + r_alive + r_ctrl
