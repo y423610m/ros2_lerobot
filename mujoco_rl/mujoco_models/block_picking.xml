@@ -43,8 +43,10 @@
     <material name="block_mat"   rgba="0.90 0.30 0.10 1"/>
     <material name="target_mat"  rgba="0.10 0.80 0.30 0.35"/>
     <material name="table_mat"   rgba="0.60 0.50 0.40 1"/>
-    <mesh name="container_visual"    file="/home/y423610m/ros2_lerobot/src/lerobot_robots_description/meshes/container_visual.stl"/>
-    <mesh name="container_collision" file="/home/y423610m/ros2_lerobot/src/lerobot_robots_description/meshes/container_collision.stl"/>
+    <!-- meshdir="assets" from the included SO101 URDF gets prepended; an extra
+         "../" compensates so this resolves to <project_root>/src/.../meshes/. -->
+    <mesh name="container_visual"    file="../../../src/lerobot_robots_description/meshes/container_visual.stl"/>
+    <mesh name="container_collision" file="../../../src/lerobot_robots_description/meshes/container_collision.stl"/>
   </asset>
 
   <worldbody>
