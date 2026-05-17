@@ -41,7 +41,8 @@ CONFIG: dict = {
     # Environment
     "n_envs":            32,
     "max_episode_steps": 500,
-    "max_relative_action": 0.1,   # cap |action - current_norm_joint_pos| per joint per step
+    # As max_relative_action=0.1 slowed down training terribly, set 2.0 to not clamp values.
+    "max_relative_action": 2.0,   # cap |action - current_norm_joint_pos| per joint per step
 
     # SAC
     "learning_rate":     3e-4,
