@@ -93,11 +93,13 @@ class BlockPickingEnv(MujocoEnv):
         random_block_pos: bool = True,
         reward_type: str = "dense",
         use_cameras: bool = False,
+        max_relative_action: float | None = None,
     ):
         self._max_episode_steps = max_episode_steps
         self._random_block_pos = random_block_pos
         self._reward_type = reward_type
         self._use_cameras = use_cameras
+        self._max_relative_action = max_relative_action
         self._step_count = 0
         self._success_count = 0
         self._episode_count = 0
@@ -196,7 +198,23 @@ class BlockPickingEnv(MujocoEnv):
         ctrl_high = self.model.actuator_ctrlrange[:, 1]
         return ctrl_low + (normalized_joint_values + 1.0) * 0.5 * (ctrl_high - ctrl_low)
 
+    def _ensure_safe_action(self, action: np.ndarray) -> np.ndarray:
+        """Clamp action so |action - current_normalized_joint_pos| <= max_relative_action."""
+        if self._max_relative_action is None:
+            return action
+        joint_pos = np.array([
+            self.data.qpos[self.model.jnt_qposadr[jid]] for jid in self._joint_ids
+        ])
+        current = self.normalize_joint_values(joint_pos)
+        diff = np.clip(
+            action - current,
+            -self._max_relative_action,
+            self._max_relative_action,
+        )
+        return (current + diff).astype(action.dtype)
+
     def step(self, action: np.ndarray):
+        action = self._ensure_safe_action(action)
         self.do_simulation(action, self.frame_skip)
         self._step_count += 1
 

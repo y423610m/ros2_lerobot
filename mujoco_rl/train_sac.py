@@ -41,6 +41,8 @@ CONFIG: dict = {
     # Environment
     "n_envs":            32,
     "max_episode_steps": 500,
+    "max_relative_action": 0.1,   # cap |action - current_norm_joint_pos| per joint per step
+
     # SAC
     "learning_rate":     3e-4,
     "buffer_size":       1_000_000,
@@ -130,6 +132,7 @@ def _make_env(rank: int, seed: int, render_mode: str | None = None):
             max_episode_steps=CONFIG["max_episode_steps"],
             random_block_pos=True,
             reward_type="dense",
+            max_relative_action=CONFIG["max_relative_action"],
         )
         env = Monitor(env)
         env.reset(seed=seed + rank)
@@ -162,6 +165,7 @@ def train(render: bool = False) -> SAC:
         max_episode_steps=CONFIG["max_episode_steps"],
         random_block_pos=True,
         reward_type="dense",
+        max_relative_action=CONFIG["max_relative_action"],
     ))])
     eval_env = VecNormalize(eval_env, norm_obs=True, norm_reward=False, clip_obs=10.0)
     eval_env.training = False
@@ -239,7 +243,7 @@ def evaluate(checkpoint: str, n_episodes: int = 20, render: bool = True) -> None
     # vec_normalize_path = Path(checkpoint).parent / "vec_normalize_final.pkl"
     vec_normalize_path = Path(checkpoint.replace("sac_", "sac_vecnormalize_").replace(".zip", ".pkl"))
 
-    CONFIG["max_episode_steps"] = 100000
+    CONFIG["max_episode_steps"] = 1000
 
     env = DummyVecEnv([lambda: Monitor(BlockPickingEnv(
         render_mode="human" if render else None,
@@ -275,7 +279,7 @@ def evaluate(checkpoint: str, n_episodes: int = 20, render: bool = True) -> None
             print(f"{action[0]=}")
             print(f"{reward=}")
             print(f"{info=}")
-            time.sleep(0.01)
+            time.sleep(0.1)
             # print(f"{obs[0][19:19+6]=}")
         rewards.append(ep_reward)
         lengths.append(ep_len)

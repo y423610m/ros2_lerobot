@@ -44,6 +44,7 @@ CONFIG: dict = {
     # Environment
     "n_envs":            8,      # fewer than train_sac.py — camera rendering is CPU-heavy
     "max_episode_steps": 500,
+    "max_relative_action": 0.1,
     # SAC
     "learning_rate":     3e-4,
     "buffer_size":       1_000_000,
@@ -213,6 +214,7 @@ def _make_env(rank: int, seed: int, render_mode: str | None = None):
             random_block_pos=True,
             reward_type="dense",
             use_cameras=True,
+            max_relative_action=CONFIG["max_relative_action"],
         )
         env = Monitor(env)
         env.reset(seed=seed + rank)
@@ -248,6 +250,7 @@ def train(render: bool = False) -> SAC:
         random_block_pos=True,
         reward_type="dense",
         use_cameras=True,
+        max_relative_action=CONFIG["max_relative_action"],
     ))])
     eval_env = VecNormalize(eval_env, norm_obs=False, norm_reward=False, clip_obs=10.0)
     eval_env.training = False
