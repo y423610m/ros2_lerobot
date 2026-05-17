@@ -62,7 +62,7 @@ REWARD_WEIGHTS: dict[str, float] = {
     "reach":           1.0,
     "grasp":           3.0,
     "lift":           50.0,   # multiplier to LIFT_THRESHOLD (=0.10) -> peak 5.0
-    "transport":       5.0,
+    "transport":       8.0,
     "descend":        15.0,
     "release":        10.0,
     "escape":         50.0,   # reward gripper moving away from block in RELEASE
