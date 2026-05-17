@@ -55,17 +55,18 @@ class Phase(IntEnum):
     TRANSFER = 3
     DESCEND  = 4
     RELEASE  = 5
+    ESCAPE   = 6
 
 
 REWARD_WEIGHTS: dict[str, float] = {
-    "phase_progress": 2.0,    # base bonus = 2 * phase_idx -> 0,2,4,6,8,10
+    "phase_progress": 5.0,    # base bonus = 2 * phase_idx -> 0,2,4,6,8,10
     "reach":           1.0,
     "grasp":           3.0,
     "lift":           50.0,   # multiplyer to LIFT_THRESHOLD(=0.05)
     "transport":       8.0,
     "descend":        10.0,
     "release":        10.0,
-    "escape":          5.0,   # reward gripper moving away from block in RELEASE
+    "escape":         50.0,   # reward gripper moving away from block in RELEASE
     "success":       500.0,
     "alive_penalty":  -0.5,
     "ctrl_penalty":   -0.1,
@@ -338,6 +339,9 @@ class BlockPickingEnv(MujocoEnv):
                 self._phase = Phase.TRANSFER
             elif block_height + 0.01 < LIFT_THRESHOLD:
                 self._phase = Phase.RELEASE
+        elif p == Phase.RELEASE:
+            if not is_grasping and not is_gripper_touching and not is_finger_touching:
+                self._phase = Phase.ESCAPE
 
     def _compute_reward(self, action: np.ndarray) -> tuple[float, dict]:
         ee_gripper = self.data.site_xpos[self._ee_gripper_sid].copy()
@@ -434,10 +438,12 @@ class BlockPickingEnv(MujocoEnv):
                 d_block_target_3d = float(np.linalg.norm(block_pos - TARGET_POS))
                 r_descend   = float(is_above_target) * np.exp(-20 * d_block_target_3d) * REWARD_WEIGHTS["descend"]
             elif phase == Phase.RELEASE:
-                r_descend = np.exp(-20 * d_block_target_3d) * REWARD_WEIGHTS["descend"]
                 r_release = (normalized_gripper_pos + 1.0) * REWARD_WEIGHTS["release"]
                 # Reward gripper moving away from block (saturates ~1 at d > 0.15m)
-                r_escape  = (1.0 - np.exp(-20 * d_ee_block)) * REWARD_WEIGHTS["escape"]
+            elif phase == Phase.ESCAPE:
+                ee_height = float(ee_pos[2] - TABLE_Z)
+                r_escape = min(ee_height, ESCAPE_THRESHOLD) * REWARD_WEIGHTS["escape"]
+                # r_escape  = (1.0 - np.exp(-20 * d_ee_block)) * REWARD_WEIGHTS["escape"]
             else:
                 # r_shape = 0.0
                 pass
