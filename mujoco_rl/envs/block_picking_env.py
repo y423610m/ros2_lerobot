@@ -45,7 +45,6 @@ TABLE_Z = 0.825
 LIFT_THRESHOLD = 0.10   # block must clear container rim (~0.077m above table)
 CONTAINER_RIM_HEIGHT = 0.077          # container rim height above its base (above table)
 CONTAINER_INTERIOR_HALF_WIDTH = 0.030 # half-width of container interior (outer ~3.8cm minus ~1cm walls)
-PLACE_THRESHOLD = 0.02
 ESCAPE_THRESHOLD = 0.05   # gripper must be >5cm from block for success
 
 class Phase(IntEnum):
@@ -398,7 +397,7 @@ class BlockPickingEnv(MujocoEnv):
             and self._point_to_line_distance(ee_wrist, ee_gripper, block_pos) < 0.01
         )
         is_lifted       = block_height > LIFT_THRESHOLD
-        is_object_above_target = d_block_target_xy < PLACE_THRESHOLD
+        is_object_above_target = d_block_target_xy < CONTAINER_INTERIOR_HALF_WIDTH
         is_escaped      = d_ee_block > ESCAPE_THRESHOLD
         is_success      = (
             is_object_above_target
