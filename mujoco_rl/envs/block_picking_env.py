@@ -62,7 +62,7 @@ REWARD_WEIGHTS: dict[str, float] = {
     "phase_progress": 5.0,    # base bonus = 2 * phase_idx -> 0,2,4,6,8,10
     "reach":           1.0,
     "grasp":           3.0,
-    "lift":           50.0,   # multiplyer to LIFT_THRESHOLD(=0.05)
+    "lift":           50.0,   # multiplier to LIFT_THRESHOLD (=0.10) -> peak 5.0
     "transport":       8.0,
     "descend":        10.0,
     "release":        10.0,
@@ -474,13 +474,16 @@ class BlockPickingEnv(MujocoEnv):
                 # Z-only shaping: drive block_height down (XY already satisfied)
                 r_descend   = np.exp(-20 * block_height) * REWARD_WEIGHTS["descend"]
             elif phase == Phase.RELEASE:
+                r_touch_gripper = float(not is_gripper_touching) * 0.5  # during release, gripper should not touch object
+                r_touch_finger = float(not is_finger_touching) * 0.5  # during release, gripper should not touch object
+                r_touch = float(not is_gripper_touching) * float(not is_finger_touching) * 1.0  # during release, gripper should not touch object
                 r_release = (normalized_gripper_pos + 1.0) * REWARD_WEIGHTS["release"]
                 r_placement_accuracy = np.exp(-20 * d_block_target_3d) * REWARD_WEIGHTS["placement_accuracy"]
             elif phase == Phase.ESCAPE:
-                ee_height = float(ee_pos[2] - TABLE_Z)
-                r_escape = min(ee_height, ESCAPE_THRESHOLD) * REWARD_WEIGHTS["escape"]
+                # Gripper must clear the container rim, not just the table top.
+                ee_above_rim = max(0.0, float(ee_pos[2] - (TABLE_Z + CONTAINER_RIM_HEIGHT)))
+                r_escape = min(ee_above_rim, ESCAPE_THRESHOLD) * REWARD_WEIGHTS["escape"]
                 r_placement_accuracy = np.exp(-20 * d_block_target_3d) * REWARD_WEIGHTS["placement_accuracy"]
-                # r_escape  = (1.0 - np.exp(-20 * d_ee_block)) * REWARD_WEIGHTS["escape"]
             else:
                 # r_shape = 0.0
                 pass
