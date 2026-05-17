@@ -12,7 +12,7 @@ All 6 joints are treated uniformly:
   wrist_roll    - wrist roll     (hinge, X)
   gripper       - gripper finger (slide, Y)
 
-Observation space (25-dim):
+Observation space (28-dim):
   joint_pos        (6)   joint positions
   joint_vel        (6)   joint velocities
   ee_pos           (3)   end-effector position [m]
@@ -20,6 +20,7 @@ Observation space (25-dim):
   block_pos        (3)   block position [m]
   block_vel        (3)   block linear velocity [m/s]
   ee_to_block      (3)   vector from EE to block [m]
+  target_pos       (3)   container site world position [m]
   block_to_target  (1)   distance from block to target [m]
 
 Action space (6-dim, continuous [-1, 1]):
@@ -40,7 +41,6 @@ XML_PATH = Path(__file__).parent.parent / "mujoco_models" / "block_picking.xml"
 
 CAM_H, CAM_W = 64, 64
 
-TARGET_POS = np.array([-0.4, -0.1, 0.84], dtype=np.float64)
 TABLE_Z = 0.825
 LIFT_THRESHOLD = 0.10   # block must clear container rim (~0.077m above table)
 CONTAINER_RIM_HEIGHT = 0.077          # container rim height above its base (above table)
@@ -70,6 +70,8 @@ REWARD_WEIGHTS: dict[str, float] = {
     "success":       500.0,
     "alive_penalty":  -0.5,
     "ctrl_penalty":   -0.1,
+    "container_touch": -1.0,    # per-step penalty while gripper/finger touches container
+    "container_move":  -50.0,   # multiplier on |container displacement (m)| from start
 }
 
 
@@ -106,14 +108,14 @@ class BlockPickingEnv(MujocoEnv):
 
         if use_cameras:
             observation_space = spaces.Dict({
-                "state":    spaces.Box(-np.inf, np.inf, shape=(25,), dtype=np.float32),
+                "state":    spaces.Box(-np.inf, np.inf, shape=(28,), dtype=np.float32),
                 "proprio":  spaces.Box(-np.inf, np.inf, shape=(12,), dtype=np.float32),
                 "overview": spaces.Box(0, 255, shape=(CAM_H, CAM_W, 3), dtype=np.uint8),
                 "hand_eye": spaces.Box(0, 255, shape=(CAM_H, CAM_W, 3), dtype=np.uint8),
             })
         else:
             observation_space = spaces.Box(
-                low=-np.inf, high=np.inf, shape=(25,), dtype=np.float32
+                low=-np.inf, high=np.inf, shape=(28,), dtype=np.float32
             )
 
         super().__init__(
@@ -149,6 +151,7 @@ class BlockPickingEnv(MujocoEnv):
         self._ee_wrist_sid    = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SITE, "ee_wrist")
         self._ee_wrist_base_sid    = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SITE, "ee_wrist_base")
         self._block_sid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SITE, "block_site")
+        self._container_sid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SITE, "container_site")
 
         blk_jid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, "block_joint")
         self._blk_qpos_adr = m.jnt_qposadr[blk_jid]
@@ -185,6 +188,8 @@ class BlockPickingEnv(MujocoEnv):
         self._phase = Phase.APPROACH
 
         mujoco.mj_forward(self.model, self.data)
+        # Snapshot container starting position so we can penalize displacement.
+        self._initial_container_pos = self.data.site_xpos[self._container_sid].copy()
         return self._get_obs()
 
     def normalize_joint_values(self, raw_joint_pos: np.ndarray):
@@ -246,9 +251,10 @@ class BlockPickingEnv(MujocoEnv):
 
         block_pos = d.site_xpos[self._block_sid].copy()
         block_vel = d.qvel[self._blk_qvel_adr:self._blk_qvel_adr + 3].copy()
+        target_pos = d.site_xpos[self._container_sid].copy()
 
         ee_to_block     = block_pos - ee_pos
-        block_to_target = np.array([np.linalg.norm(TARGET_POS - block_pos)])
+        block_to_target = np.array([np.linalg.norm(target_pos - block_pos)])
 
         state = np.concatenate([
             joint_pos,        # 6
@@ -258,6 +264,7 @@ class BlockPickingEnv(MujocoEnv):
             block_pos,        # 3
             block_vel,        # 3
             ee_to_block,      # 3
+            target_pos,       # 3   container position (may shift if pushed)
             block_to_target,  # 1
         ]).astype(np.float32)
 
@@ -330,6 +337,7 @@ class BlockPickingEnv(MujocoEnv):
         is_finger_touching: bool,
         block_height: float,
         is_block_in_container: bool,
+        is_block_above_container: bool,
     ) -> None:
         p = self._phase
 
@@ -356,7 +364,7 @@ class BlockPickingEnv(MujocoEnv):
         elif p == Phase.DESCEND:
             if not is_object_above_target:
                 self._phase = Phase.TRANSFER
-            elif is_block_in_container:
+            elif is_block_above_container:
                 self._phase = Phase.RELEASE
         elif p == Phase.RELEASE:
             if not is_object_above_target:
@@ -372,10 +380,12 @@ class BlockPickingEnv(MujocoEnv):
         ee_wrist = self.data.site_xpos[self._ee_wrist_sid].copy()
         ee_pos = (ee_gripper + ee_wrist) / 2.0
         block_pos = self.data.site_xpos[self._block_sid].copy()
+        # Container is not bolted down — query its live world position each step.
+        target_pos = self.data.site_xpos[self._container_sid].copy()
 
         d_ee_block        = float(np.linalg.norm(block_pos - ee_pos))
-        d_block_target_xy = float(np.linalg.norm(block_pos[:2] - TARGET_POS[:2]))
-        d_block_target_3d = float(np.linalg.norm(block_pos - TARGET_POS))
+        d_block_target_xy = float(np.linalg.norm(block_pos[:2] - target_pos[:2]))
+        d_block_target_3d = float(np.linalg.norm(block_pos - target_pos))
         block_height      = float(block_pos[2] - TABLE_Z)
         is_near_object = d_ee_block < 0.03
 
@@ -384,12 +394,26 @@ class BlockPickingEnv(MujocoEnv):
 
         is_gripper_touching = self._has_contact("gripper_finger_collision_inner", "block_geom")
         is_finger_touching  = self._has_contact("moving_jaw_finger_collision_inner", "block_geom")
+        is_robot_touching_container = (
+            self._has_contact("gripper_finger_collision_inner",  "container_collision")
+            or self._has_contact("gripper_finger_collision_outer",  "container_collision")
+            or self._has_contact("moving_jaw_finger_collision_inner", "container_collision")
+            or self._has_contact("moving_jaw_finger_collision_outer", "container_collision")
+        )
+        container_displacement = float(np.linalg.norm(target_pos - self._initial_container_pos))
         # Geometric check: block center within container's interior volume.
         # Contact-based check fires on outside walls too, hence unreliable.
         is_block_in_container = (
-            abs(block_pos[0] - TARGET_POS[0]) < CONTAINER_INTERIOR_HALF_WIDTH
-            and abs(block_pos[1] - TARGET_POS[1]) < CONTAINER_INTERIOR_HALF_WIDTH
+            abs(block_pos[0] - target_pos[0]) < CONTAINER_INTERIOR_HALF_WIDTH
+            and abs(block_pos[1] - target_pos[1]) < CONTAINER_INTERIOR_HALF_WIDTH
             and 0 < block_height < CONTAINER_RIM_HEIGHT
+        )
+        # Looser version for the DESCEND -> RELEASE transition: block can be up to
+        # ~3cm above the rim. Once the gripper opens here, gravity finishes the job.
+        is_block_above_container = (
+            abs(block_pos[0] - target_pos[0]) < CONTAINER_INTERIOR_HALF_WIDTH
+            and abs(block_pos[1] - target_pos[1]) < CONTAINER_INTERIOR_HALF_WIDTH
+            and 0 < block_height < CONTAINER_RIM_HEIGHT + 0.03
         )
         is_grasping = (
             is_gripper_touching
@@ -414,7 +438,7 @@ class BlockPickingEnv(MujocoEnv):
             self._update_phase(
                 is_near_object, is_grasping, is_lifted, is_object_above_target,
                 is_gripper_touching, is_finger_touching, block_height,
-                is_block_in_container,
+                is_block_in_container, is_block_above_container,
             )
             phase = self._phase
 
@@ -431,8 +455,6 @@ class BlockPickingEnv(MujocoEnv):
             r_release   = 0.0
             r_escape    = 0.0
             r_placement_accuracy = 0.0
-
-            d_block_target_3d = float(np.linalg.norm(block_pos - TARGET_POS))
 
             if phase == Phase.APPROACH:
                 r_reach = (0.3 * (-d_ee_block) + np.exp(-20 * d_ee_block)) * REWARD_WEIGHTS["reach"]
@@ -497,7 +519,12 @@ class BlockPickingEnv(MujocoEnv):
             r_success = float(is_success) * REWARD_WEIGHTS["success"]
             r_alive   = REWARD_WEIGHTS["alive_penalty"]
             r_ctrl    = float(np.linalg.norm(action - self.prev_action)) * REWARD_WEIGHTS["ctrl_penalty"]
-            reward = r_progress + r_reach + r_touch_gripper + r_touch_finger + r_touch + r_grasp + r_lift + r_transport + r_descend + r_release + r_escape + r_placement_accuracy + r_success + r_alive + r_ctrl
+            r_container_touch = float(is_robot_touching_container) * REWARD_WEIGHTS["container_touch"]
+            r_container_move  = container_displacement * REWARD_WEIGHTS["container_move"]
+            reward = (r_progress + r_reach + r_touch_gripper + r_touch_finger + r_touch
+                      + r_grasp + r_lift + r_transport + r_descend + r_release + r_escape
+                      + r_placement_accuracy + r_success + r_alive + r_ctrl
+                      + r_container_touch + r_container_move)
             info = {
                 "r_reach":     r_reach,
                 "r_touch_gripper": r_touch_gripper,
@@ -511,6 +538,8 @@ class BlockPickingEnv(MujocoEnv):
                 "r_escape":    r_escape,
                 "r_placement_accuracy": r_placement_accuracy,
                 "r_ctrl":      r_ctrl,
+                "r_container_touch": r_container_touch,
+                "r_container_move":  r_container_move,
                 "phase":      int(phase),
                 "r_progress": float(r_progress),
             }
@@ -526,6 +555,8 @@ class BlockPickingEnv(MujocoEnv):
             "is_object_above_target": bool(is_object_above_target),
             "is_escaped":      bool(is_escaped),
             "is_block_in_container": bool(is_block_in_container),
+            "is_robot_touching_container": bool(is_robot_touching_container),
+            "container_displacement": container_displacement,
         })
         self.prev_action = action.copy()
         return float(reward), info
