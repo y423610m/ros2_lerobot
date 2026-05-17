@@ -42,7 +42,9 @@ CAM_H, CAM_W = 64, 64
 
 TARGET_POS = np.array([-0.4, -0.1, 0.84], dtype=np.float64)
 TABLE_Z = 0.825
-LIFT_THRESHOLD = 0.05
+LIFT_THRESHOLD = 0.10   # block must clear container rim (~0.077m above table)
+CONTAINER_RIM_HEIGHT = 0.077          # container rim height above its base (above table)
+CONTAINER_INTERIOR_HALF_WIDTH = 0.030 # half-width of container interior (outer ~3.8cm minus ~1cm walls)
 PLACE_THRESHOLD = 0.02
 ESCAPE_THRESHOLD = 0.05   # gripper must be >5cm from block for success
 
@@ -321,13 +323,14 @@ class BlockPickingEnv(MujocoEnv):
 
     def _update_phase(
         self,
-        is_near_object: bool, 
+        is_near_object: bool,
         is_grasping: bool,
         is_lifted: bool,
         is_object_above_target: bool,
         is_gripper_touching: bool,
         is_finger_touching: bool,
         block_height: float,
+        is_block_in_container: bool,
     ) -> None:
         p = self._phase
 
@@ -354,7 +357,7 @@ class BlockPickingEnv(MujocoEnv):
         elif p == Phase.DESCEND:
             if not is_object_above_target:
                 self._phase = Phase.TRANSFER
-            elif block_height + 0.01 < LIFT_THRESHOLD:
+            elif is_block_in_container:
                 self._phase = Phase.RELEASE
         elif p == Phase.RELEASE:
             if not is_object_above_target:
@@ -382,6 +385,13 @@ class BlockPickingEnv(MujocoEnv):
 
         is_gripper_touching = self._has_contact("gripper_finger_collision_inner", "block_geom")
         is_finger_touching  = self._has_contact("moving_jaw_finger_collision_inner", "block_geom")
+        # Geometric check: block center within container's interior volume.
+        # Contact-based check fires on outside walls too, hence unreliable.
+        is_block_in_container = (
+            abs(block_pos[0] - TARGET_POS[0]) < CONTAINER_INTERIOR_HALF_WIDTH
+            and abs(block_pos[1] - TARGET_POS[1]) < CONTAINER_INTERIOR_HALF_WIDTH
+            and 0 < block_height < CONTAINER_RIM_HEIGHT
+        )
         is_grasping = (
             is_gripper_touching
             and is_finger_touching
@@ -392,7 +402,7 @@ class BlockPickingEnv(MujocoEnv):
         is_escaped      = d_ee_block > ESCAPE_THRESHOLD
         is_success      = (
             is_object_above_target
-            and (block_height < LIFT_THRESHOLD + 0.03)
+            and is_block_in_container
             and not is_gripper_touching
             and not is_finger_touching
             and is_escaped
@@ -405,6 +415,7 @@ class BlockPickingEnv(MujocoEnv):
             self._update_phase(
                 is_near_object, is_grasping, is_lifted, is_object_above_target,
                 is_gripper_touching, is_finger_touching, block_height,
+                is_block_in_container,
             )
             phase = self._phase
 
@@ -507,6 +518,7 @@ class BlockPickingEnv(MujocoEnv):
             "is_success":      bool(is_success),
             "is_object_above_target": bool(is_object_above_target),
             "is_escaped":      bool(is_escaped),
+            "is_block_in_container": bool(is_block_in_container),
         })
         self.prev_action = action.copy()
         return float(reward), info
