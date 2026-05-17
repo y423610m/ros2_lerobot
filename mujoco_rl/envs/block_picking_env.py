@@ -44,6 +44,7 @@ TARGET_POS = np.array([-0.4, -0.1, 0.84], dtype=np.float64)
 TABLE_Z = 0.825
 LIFT_THRESHOLD = 0.05
 PLACE_THRESHOLD = 0.04
+ESCAPE_THRESHOLD = 0.05   # gripper must be >5cm from block for success
 MAX_FINGER_SLIDE = 0.040
 
 
@@ -64,6 +65,7 @@ REWARD_WEIGHTS: dict[str, float] = {
     "transport":       8.0,
     "descend":        10.0,
     "release":        10.0,
+    "escape":          5.0,   # reward gripper moving away from block in RELEASE
     "success":       500.0,
     "alive_penalty":  -0.5,
     "ctrl_penalty":   -0.1,
@@ -334,7 +336,7 @@ class BlockPickingEnv(MujocoEnv):
         elif p == Phase.DESCEND:
             if not is_above_target:
                 self._phase = Phase.TRANSFER
-            elif block_height < LIFT_THRESHOLD + 0.03:
+            elif block_height + 0.01 < LIFT_THRESHOLD:
                 self._phase = Phase.RELEASE
 
     def _compute_reward(self, action: np.ndarray) -> tuple[float, dict]:
@@ -361,11 +363,13 @@ class BlockPickingEnv(MujocoEnv):
         )
         is_lifted       = block_height > LIFT_THRESHOLD
         is_above_target = d_block_target_xy < PLACE_THRESHOLD
+        is_escaped      = d_ee_block > ESCAPE_THRESHOLD
         is_success      = (
             is_above_target
             and (block_height < LIFT_THRESHOLD + 0.03)
             and not is_gripper_touching
             and not is_finger_touching
+            and is_escaped
         )
 
         if self._reward_type == "sparse":
@@ -389,6 +393,7 @@ class BlockPickingEnv(MujocoEnv):
             r_transport = 0.0
             r_descend   = 0.0
             r_release   = 0.0
+            r_escape    = 0.0
 
             if phase == Phase.APPROACH:
                 r_reach = (0.3 * (-d_ee_block) + np.exp(-20 * d_ee_block)) * REWARD_WEIGHTS["reach"]
@@ -429,7 +434,10 @@ class BlockPickingEnv(MujocoEnv):
                 d_block_target_3d = float(np.linalg.norm(block_pos - TARGET_POS))
                 r_descend   = float(is_above_target) * np.exp(-20 * d_block_target_3d) * REWARD_WEIGHTS["descend"]
             elif phase == Phase.RELEASE:
-                r_release   = (normalized_gripper_pos + 1.0) * REWARD_WEIGHTS["release"]
+                r_descend = np.exp(-20 * d_block_target_3d) * REWARD_WEIGHTS["descend"]
+                r_release = (normalized_gripper_pos + 1.0) * REWARD_WEIGHTS["release"]
+                # Reward gripper moving away from block (saturates ~1 at d > 0.15m)
+                r_escape  = (1.0 - np.exp(-20 * d_ee_block)) * REWARD_WEIGHTS["escape"]
             else:
                 # r_shape = 0.0
                 pass
@@ -437,7 +445,7 @@ class BlockPickingEnv(MujocoEnv):
             r_success = float(is_success) * REWARD_WEIGHTS["success"]
             r_alive   = REWARD_WEIGHTS["alive_penalty"]
             r_ctrl    = float(np.linalg.norm(action - self.prev_action)) * REWARD_WEIGHTS["ctrl_penalty"]
-            reward = r_progress + r_reach + r_touch_gripper + r_touch_finger + r_touch + r_grasp + r_lift + r_transport + r_descend + r_release + r_success + r_alive + r_ctrl
+            reward = r_progress + r_reach + r_touch_gripper + r_touch_finger + r_touch + r_grasp + r_lift + r_transport + r_descend + r_release + r_escape + r_success + r_alive + r_ctrl
             info = {
                 "r_reach":     r_reach,
                 "r_touch_gripper": r_touch_gripper,
@@ -448,6 +456,7 @@ class BlockPickingEnv(MujocoEnv):
                 "r_transport": r_transport,
                 "r_descend":   r_descend,
                 "r_release":   r_release,
+                "r_escape":    r_escape,
                 "r_ctrl":      r_ctrl,
                 "phase":      int(phase),
                 "r_progress": float(r_progress),
@@ -462,6 +471,7 @@ class BlockPickingEnv(MujocoEnv):
             "is_lifted":       bool(is_lifted),
             "is_success":      bool(is_success),
             "is_above_target": bool(is_above_target),
+            "is_escaped":      bool(is_escaped),
         })
         self.prev_action = action.copy()
         return float(reward), info
