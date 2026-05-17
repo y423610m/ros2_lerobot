@@ -62,8 +62,8 @@ REWARD_WEIGHTS: dict[str, float] = {
     "reach":           1.0,
     "grasp":           3.0,
     "lift":           50.0,   # multiplier to LIFT_THRESHOLD (=0.10) -> peak 5.0
-    "transport":       8.0,
-    "descend":        10.0,
+    "transport":       5.0,
+    "descend":        15.0,
     "release":        10.0,
     "escape":         50.0,   # reward gripper moving away from block in RELEASE
     "placement_accuracy": 10.0, # reward block-to-target 3D distance during RELEASE/ESCAPE
@@ -454,28 +454,27 @@ class BlockPickingEnv(MujocoEnv):
                 r_touch = float(is_gripper_touching) * float(is_finger_touching) * 1.0
                 r_grasp     = float(is_grasping) * float(not is_object_above_target) * (1.0 - normalized_gripper_pos) * REWARD_WEIGHTS["grasp"]
                 r_lift      = min(block_height, LIFT_THRESHOLD) * REWARD_WEIGHTS["lift"]
-                # r_shape = block_height * REWARD_WEIGHTS["lift"]
             elif phase == Phase.TRANSFER:
                 r_reach = (0.3 * (-d_ee_block) + np.exp(-20 * d_ee_block)) * REWARD_WEIGHTS["reach"]
                 r_touch_gripper = float(is_gripper_touching) * 0.5
                 r_touch_finger = float(is_finger_touching) * 0.5
                 r_touch = float(is_gripper_touching) * float(is_finger_touching) * 1.0
                 r_grasp     = float(is_grasping) * float(not is_object_above_target) * (1.0 - normalized_gripper_pos) * REWARD_WEIGHTS["grasp"]
-                r_lift      = min(block_height, LIFT_THRESHOLD) * REWARD_WEIGHTS["lift"]
                 r_transport = (0.3 * (-d_block_target_xy) + np.exp(-20 * d_block_target_xy)) * REWARD_WEIGHTS["transport"]
-                # r_shape = np.exp(-20 * d_block_target_xy) * REWARD_WEIGHTS["transport"]
+                r_lift      = min(block_height, LIFT_THRESHOLD) * REWARD_WEIGHTS["lift"]
             elif phase == Phase.DESCEND:
                 r_reach = (0.3 * (-d_ee_block) + np.exp(-20 * d_ee_block)) * REWARD_WEIGHTS["reach"]
                 r_touch_gripper = float(is_gripper_touching) * 0.5
                 r_touch_finger = float(is_finger_touching) * 0.5
                 r_touch = float(is_gripper_touching) * float(is_finger_touching) * 1.0
                 r_grasp     = float(is_grasping) * float(not is_object_above_target) * (1.0 - normalized_gripper_pos) * REWARD_WEIGHTS["grasp"]
-                # Z-only shaping: drive block_height down (XY already satisfied)
+                r_transport = (0.3 * (-d_block_target_xy) + np.exp(-20 * d_block_target_xy)) * REWARD_WEIGHTS["transport"]
                 r_descend   = np.exp(-20 * block_height) * REWARD_WEIGHTS["descend"]
             elif phase == Phase.RELEASE:
                 r_touch_gripper = float(not is_gripper_touching) * 0.5  # during release, gripper should not touch object
                 r_touch_finger = float(not is_finger_touching) * 0.5  # during release, gripper should not touch object
                 r_touch = float(not is_gripper_touching) * float(not is_finger_touching) * 1.0  # during release, gripper should not touch object
+                r_transport = (0.3 * (-d_block_target_xy) + np.exp(-20 * d_block_target_xy)) * REWARD_WEIGHTS["transport"]
                 r_release = (normalized_gripper_pos + 1.0) * REWARD_WEIGHTS["release"]
                 # Flat full reward once the block is inside the container; outside,
                 # the exp gradient nudges the block back toward the opening.
