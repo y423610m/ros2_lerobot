@@ -280,7 +280,7 @@ def evaluate(checkpoint: str, n_episodes: int = 20, render: bool = True) -> None
             print(f"{action[0]=}")
             print(f"{reward=}")
             print(f"{info=}")
-            time.sleep(0.1)
+            time.sleep(0.01)
             # print(f"{obs[0][19:19+6]=}")
         rewards.append(ep_reward)
         lengths.append(ep_len)

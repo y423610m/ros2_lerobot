@@ -45,7 +45,7 @@ TABLE_Z = 0.825
 LIFT_THRESHOLD = 0.10   # block must clear container rim (~0.077m above table)
 CONTAINER_RIM_HEIGHT = 0.077          # container rim height above its base (above table)
 CONTAINER_INTERIOR_HALF_WIDTH = 0.030 # half-width of container interior (outer ~3.8cm minus ~1cm walls)
-ESCAPE_THRESHOLD = 0.05   # gripper must be >5cm from block for success
+ESCAPE_THRESHOLD = 0.1   # gripper must be >5cm from block for success
 
 class Phase(IntEnum):
     APPROACH = 0
@@ -65,7 +65,7 @@ REWARD_WEIGHTS: dict[str, float] = {
     "transport":       8.0,
     "descend":        15.0,
     "release":        10.0,
-    "escape":         50.0,   # reward gripper moving away from block in RELEASE
+    "escape":         100.0,   # reward gripper moving away from block in RELEASE
     "placement_accuracy": 10.0, # reward block-to-target 3D distance during RELEASE/ESCAPE
     "success":       500.0,
     "alive_penalty":  -0.5,
@@ -503,6 +503,9 @@ class BlockPickingEnv(MujocoEnv):
                 r_placement_accuracy = REWARD_WEIGHTS["placement_accuracy"] if is_block_in_container \
                     else np.exp(-20 * d_block_target_3d) * REWARD_WEIGHTS["placement_accuracy"]
             elif phase == Phase.ESCAPE:
+                r_touch_gripper = float(not is_gripper_touching) * 0.5  # during release, gripper should not touch object
+                r_touch_finger = float(not is_finger_touching) * 0.5  # during release, gripper should not touch object
+                r_touch = float(not is_gripper_touching) * float(not is_finger_touching) * 1.0  # during release, gripper should not touch object
                 # Gripper must clear the container rim, not just the table top.
                 ee_above_rim = max(0.0, float(ee_pos[2] - (TABLE_Z + CONTAINER_RIM_HEIGHT)))
                 r_escape = min(ee_above_rim, ESCAPE_THRESHOLD) * REWARD_WEIGHTS["escape"]
