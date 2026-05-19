@@ -47,6 +47,11 @@ CONTAINER_RIM_HEIGHT = 0.077          # container rim height above its base (abo
 CONTAINER_INTERIOR_HALF_WIDTH = 0.030 # half-width of container interior (outer ~3.8cm minus ~1cm walls)
 ESCAPE_THRESHOLD = 0.1   # gripper must be >5cm from block for success
 
+# Initial joint configuration (also the HOME phase target).
+INIT_QPOS = np.array([0.0, -0.3, 0.6, 0.3, 0.0, 0.02], dtype=np.float64)
+HOME_TOLERANCE = 0.10   # normalized joint-space distance below which the robot is "at home"
+
+
 class Phase(IntEnum):
     APPROACH = 0
     GRASP    = 1
@@ -55,6 +60,7 @@ class Phase(IntEnum):
     DESCEND  = 4
     RELEASE  = 5
     ESCAPE   = 6
+    HOME     = 7
 
 
 REWARD_WEIGHTS: dict[str, float] = {
@@ -67,6 +73,7 @@ REWARD_WEIGHTS: dict[str, float] = {
     "release":        32.0,
     "escape":         64.0,   # reward gripper moving away from block in RELEASE
     "placement_accuracy": 20.0, # reward block-to-target 3D distance during RELEASE/ESCAPE
+    "home":          128.0,   # reward returning joints to INIT_QPOS during HOME phase
     "success":       1000.0,
     "alive_penalty":  -0.5,
     "ctrl_penalty":   -0.1,
@@ -168,9 +175,8 @@ class BlockPickingEnv(MujocoEnv):
         self.data.qvel[:] = 0
 
         # shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper
-        init_qpos = np.array([0.0, -0.3, 0.6, 0.3, 0.0, 0.02])
         for i, jid in enumerate(self._joint_ids):
-            self.data.qpos[self.model.jnt_qposadr[jid]] = init_qpos[i]
+            self.data.qpos[self.model.jnt_qposadr[jid]] = INIT_QPOS[i]
 
         if self._random_block_pos:
             bx = self.np_random.uniform(-0.5, -0.3)
@@ -338,6 +344,7 @@ class BlockPickingEnv(MujocoEnv):
         block_height: float,
         is_block_in_container: bool,
         is_block_above_container: bool,
+        is_block_placed: bool,
     ) -> None:
         p = self._phase
 
@@ -374,6 +381,9 @@ class BlockPickingEnv(MujocoEnv):
         elif p == Phase.ESCAPE:
             if not is_object_above_target:
                 self._phase = Phase.APPROACH
+            elif is_block_placed:
+                self._phase = Phase.HOME
+        # HOME has no forward transition; success terminates the episode.
 
     def _compute_reward(self, action: np.ndarray) -> tuple[float, dict]:
         ee_gripper = self.data.site_xpos[self._ee_gripper_sid].copy()
@@ -423,7 +433,7 @@ class BlockPickingEnv(MujocoEnv):
         is_lifted       = block_height > LIFT_THRESHOLD
         is_object_above_target = d_block_target_xy < CONTAINER_INTERIOR_HALF_WIDTH
         is_escaped      = d_ee_block > ESCAPE_THRESHOLD
-        is_success      = (
+        is_block_placed = (
             is_object_above_target
             and is_block_in_container
             and not is_gripper_touching
@@ -431,16 +441,28 @@ class BlockPickingEnv(MujocoEnv):
             and is_escaped
         )
 
+        # Distance from current joints to INIT_QPOS in normalized [-1, 1] space.
+        norm_joint = self.normalize_joint_values(joint_pos)
+        norm_home  = self.normalize_joint_values(INIT_QPOS)
+        joint_dist_to_home = float(np.linalg.norm(norm_joint - norm_home))
+        is_at_home = joint_dist_to_home < HOME_TOLERANCE
+
+        # Phase must be updated before is_success so HOME-gating works in both
+        # sparse and dense modes.
+        self._update_phase(
+            is_near_object, is_grasping, is_lifted, is_object_above_target,
+            is_gripper_touching, is_finger_touching, block_height,
+            is_block_in_container, is_block_above_container, is_block_placed,
+        )
+        phase = self._phase
+
+        # Success requires the block to be placed AND the robot to have returned home.
+        is_success = is_block_placed and phase == Phase.HOME and is_at_home
+
         if self._reward_type == "sparse":
             reward = 1.0 if is_success else 0.0
             info: dict = {}
         else:
-            self._update_phase(
-                is_near_object, is_grasping, is_lifted, is_object_above_target,
-                is_gripper_touching, is_finger_touching, block_height,
-                is_block_in_container, is_block_above_container,
-            )
-            phase = self._phase
 
             r_progress = int(phase) * REWARD_WEIGHTS["phase_progress"]
 
@@ -455,6 +477,7 @@ class BlockPickingEnv(MujocoEnv):
             r_release   = 0.0
             r_escape    = 0.0
             r_placement_accuracy = 0.0
+            r_home      = 0.0
 
             if phase == Phase.APPROACH:
                 r_reach = (0.3 * (-d_ee_block) + np.exp(-20 * d_ee_block)) * REWARD_WEIGHTS["reach"]
@@ -513,6 +536,15 @@ class BlockPickingEnv(MujocoEnv):
                 # the exp gradient nudges the block back toward the opening.
                 r_placement_accuracy = REWARD_WEIGHTS["placement_accuracy"] if is_block_in_container \
                     else np.exp(-20 * d_block_target_3d) * REWARD_WEIGHTS["placement_accuracy"]
+            elif phase == Phase.HOME:
+                # Stay clear of the block, keep accuracy reward for keeping
+                # block in container, and pull joints back to INIT_QPOS.
+                r_touch_gripper = float(not is_gripper_touching) * 0.2
+                r_touch_finger  = float(not is_finger_touching) * 0.2
+                r_touch         = float(not is_gripper_touching) * float(not is_finger_touching) * 0.5
+                r_placement_accuracy = REWARD_WEIGHTS["placement_accuracy"] if is_block_in_container \
+                    else np.exp(-20 * d_block_target_3d) * REWARD_WEIGHTS["placement_accuracy"]
+                r_home = np.exp(-3 * joint_dist_to_home) * REWARD_WEIGHTS["home"]
             else:
                 # r_shape = 0.0
                 pass
@@ -526,7 +558,7 @@ class BlockPickingEnv(MujocoEnv):
             r_container_move  = container_displacement * REWARD_WEIGHTS["container_move"]
             reward = (r_progress + r_reach + r_touch_gripper + r_touch_finger + r_touch
                       + r_grasp + r_lift + r_transport + r_descend + r_release + r_escape
-                      + r_placement_accuracy + r_success + r_alive + r_ctrl
+                      + r_placement_accuracy + r_home + r_success + r_alive + r_ctrl
                       + r_container_touch + r_container_move)
             info = {
                 "r_reach":     r_reach,
@@ -540,6 +572,7 @@ class BlockPickingEnv(MujocoEnv):
                 "r_release":   r_release,
                 "r_escape":    r_escape,
                 "r_placement_accuracy": r_placement_accuracy,
+                "r_home":      r_home,
                 "r_ctrl":      r_ctrl,
                 "r_container_touch": r_container_touch,
                 "r_container_move":  r_container_move,
@@ -560,6 +593,9 @@ class BlockPickingEnv(MujocoEnv):
             "is_block_in_container": bool(is_block_in_container),
             "is_robot_touching_container": bool(is_robot_touching_container),
             "container_displacement": container_displacement,
+            "is_block_placed": bool(is_block_placed),
+            "is_at_home":      bool(is_at_home),
+            "joint_dist_to_home": joint_dist_to_home,
         })
         self.prev_action = action.copy()
         return float(reward), info
