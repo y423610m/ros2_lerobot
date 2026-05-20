@@ -340,13 +340,13 @@ class BlockPickingEnv(MujocoEnv):
         is_near_object: bool,
         is_grasping: bool,
         is_lifted: bool,
-        is_object_above_target: bool,
         is_gripper_touching: bool,
         is_finger_touching: bool,
         block_height: float,
-        is_block_in_container: bool,
-        is_block_above_container: bool,
-        is_block_placed: bool,
+        is_object_in_container: bool,
+        is_object_above_container: bool,
+        is_object_above_near_container: bool,
+        is_object_placed: bool,
     ) -> None:
         p = self._phase
 
@@ -368,23 +368,20 @@ class BlockPickingEnv(MujocoEnv):
             if is_lifted:
                 self._phase = Phase.TRANSFER
         elif p == Phase.TRANSFER:
-            if is_object_above_target:
+            if is_object_above_container:
                 self._phase = Phase.DESCEND
         elif p == Phase.DESCEND:
-            if not is_object_above_target:
-                self._phase = Phase.TRANSFER
-            elif is_block_above_container:
+            if is_object_above_near_container:
                 self._phase = Phase.RELEASE
         elif p == Phase.RELEASE:
-            if not is_object_above_target:
-                self._phase = Phase.APPROACH
-            elif not is_gripper_touching or not is_finger_touching:
+            if not is_gripper_touching or not is_finger_touching:
                 self._phase = Phase.ESCAPE
         elif p == Phase.ESCAPE:
-            if not is_object_above_target:
-                self._phase = Phase.APPROACH
-            elif is_block_placed:
+            if is_lifted:
                 self._phase = Phase.HOME
+        elif p == Phase.HOME:
+            if not is_object_in_container:
+                self._phase = Phase.APPROACH
         # HOME has no forward transition; success terminates the episode.
 
     def _compute_reward(self, action: np.ndarray) -> tuple[float, dict]:
@@ -413,31 +410,30 @@ class BlockPickingEnv(MujocoEnv):
             or self._has_contact("moving_jaw_finger_collision_outer", "container_collision")
         )
         container_displacement = float(np.linalg.norm(target_pos - self._initial_container_pos))
-        # Geometric check: block center within container's interior volume.
-        # Contact-based check fires on outside walls too, hence unreliable.
-        is_block_in_container = (
-            abs(block_pos[0] - target_pos[0]) < CONTAINER_INTERIOR_HALF_WIDTH
-            and abs(block_pos[1] - target_pos[1]) < CONTAINER_INTERIOR_HALF_WIDTH
-            and 0 < block_height < CONTAINER_RIM_HEIGHT
-        )
         # Looser version for the DESCEND -> RELEASE transition: block can be up to
         # ~3cm above the rim. Once the gripper opens here, gravity finishes the job.
-        is_block_above_container = (
-            abs(block_pos[0] - target_pos[0]) < CONTAINER_INTERIOR_HALF_WIDTH
-            and abs(block_pos[1] - target_pos[1]) < CONTAINER_INTERIOR_HALF_WIDTH
-            and 0 < block_height < CONTAINER_RIM_HEIGHT + 0.03
-        )
+        
+        # Geometric check: block center within container's interior volume.
+        # Contact-based check fires on outside walls too, hence unreliable.
         is_grasping = (
             is_gripper_touching
             and is_finger_touching
             and self._point_to_line_distance(ee_wrist, ee_gripper, block_pos) < 0.01
         )
         is_lifted       = block_height > LIFT_MIN_THRESHOLD
-        is_object_above_target = d_block_target_xy < CONTAINER_INTERIOR_HALF_WIDTH
+        is_object_above_container = d_block_target_xy < CONTAINER_INTERIOR_HALF_WIDTH
+        is_object_above_near_container = (
+            is_object_above_container
+            and block_height < CONTAINER_RIM_HEIGHT + 0.04
+        )
+        is_object_in_container = (
+            is_object_above_container
+            and 0 < block_height < CONTAINER_RIM_HEIGHT + 0.01
+        )
         is_escaped      = d_ee_block > ESCAPE_THRESHOLD
-        is_block_placed = (
-            is_object_above_target
-            and is_block_in_container
+        is_object_placed = (
+            is_object_above_container
+            and is_object_in_container
             and not is_gripper_touching
             and not is_finger_touching
             and is_escaped
@@ -452,14 +448,14 @@ class BlockPickingEnv(MujocoEnv):
         # Phase must be updated before is_success so HOME-gating works in both
         # sparse and dense modes.
         self._update_phase(
-            is_near_object, is_grasping, is_lifted, is_object_above_target,
+            is_near_object, is_grasping, is_lifted,
             is_gripper_touching, is_finger_touching, block_height,
-            is_block_in_container, is_block_above_container, is_block_placed,
+            is_object_in_container, is_object_above_container, is_object_above_near_container, is_object_placed,
         )
         phase = self._phase
 
         # Success requires the block to be placed AND the robot to have returned home.
-        is_success = is_block_placed and phase == Phase.HOME and is_at_home
+        is_success = is_object_placed and phase == Phase.HOME and is_at_home
 
         if self._reward_type == "sparse":
             reward = 1.0 if is_success else 0.0
@@ -486,27 +482,27 @@ class BlockPickingEnv(MujocoEnv):
                 # r_touch_gripper = float(is_gripper_touching) * 0.2
                 # r_touch_finger = float(is_finger_touching) * 0.2
                 # r_touch = float(is_gripper_touching) * float(is_finger_touching) * 0.5
-                # r_grasp     = float(is_grasping) * float(not is_object_above_target) * (1.0 - normalized_gripper_pos) * 0.5 * REWARD_WEIGHTS["grasp"]
+                # r_grasp     = float(is_grasping) * float(not is_object_above_container) * (1.0 - normalized_gripper_pos) * 0.5 * REWARD_WEIGHTS["grasp"]
             elif phase == Phase.GRASP:
                 r_reach = (0.3 * (-d_ee_block) + np.exp(-20 * d_ee_block)) * REWARD_WEIGHTS["reach"]
                 r_touch_gripper = float(is_gripper_touching) * 0.2
                 r_touch_finger = float(is_finger_touching) * 0.2
                 r_touch = float(is_gripper_touching) * float(is_finger_touching) * 0.5
-                r_grasp     = float(is_grasping) * float(not is_object_above_target) * (1.0 - normalized_gripper_pos) * 0.5 * REWARD_WEIGHTS["grasp"]
+                r_grasp     = float(is_grasping) * float(not is_object_above_container) * (1.0 - normalized_gripper_pos) * 0.5 * REWARD_WEIGHTS["grasp"]
                 # r_shape = (1.0 - normalized_gripper_pos) * 0.5 * REWARD_WEIGHTS["grasp"]
             elif phase == Phase.LIFT:
                 r_reach = (0.3 * (-d_ee_block) + np.exp(-20 * d_ee_block)) * REWARD_WEIGHTS["reach"]
                 r_touch_gripper = float(is_gripper_touching) * 0.2
                 r_touch_finger = float(is_finger_touching) * 0.2
                 r_touch = float(is_gripper_touching) * float(is_finger_touching) * 0.5
-                r_grasp     = float(is_grasping) * float(not is_object_above_target) * (1.0 - normalized_gripper_pos) * 0.5 * REWARD_WEIGHTS["grasp"]
+                r_grasp     = float(is_grasping) * float(not is_object_above_container) * (1.0 - normalized_gripper_pos) * 0.5 * REWARD_WEIGHTS["grasp"]
                 r_lift      = min(block_height, LIFT_MAX_THRESHOLD) * 10.0 * REWARD_WEIGHTS["lift"]
             elif phase == Phase.TRANSFER:
                 r_reach = (0.3 * (-d_ee_block) + np.exp(-20 * d_ee_block)) * REWARD_WEIGHTS["reach"]
                 r_touch_gripper = float(is_gripper_touching) * 0.2
                 r_touch_finger = float(is_finger_touching) * 0.2
                 r_touch = float(is_gripper_touching) * float(is_finger_touching) * 0.5
-                r_grasp     = float(is_grasping) * float(not is_object_above_target) * (1.0 - normalized_gripper_pos) * 0.5 * REWARD_WEIGHTS["grasp"]
+                r_grasp     = float(is_grasping) * float(not is_object_above_container) * (1.0 - normalized_gripper_pos) * 0.5 * REWARD_WEIGHTS["grasp"]
                 r_lift      = min(block_height, LIFT_MAX_THRESHOLD) * 10.0 * REWARD_WEIGHTS["lift"]
                 r_transport = (0.3 * (-d_block_target_xy) + np.exp(-20 * d_block_target_xy)) * REWARD_WEIGHTS["transport"]
             elif phase == Phase.DESCEND:
@@ -514,7 +510,7 @@ class BlockPickingEnv(MujocoEnv):
                 r_touch_gripper = float(is_gripper_touching) * 0.2
                 r_touch_finger = float(is_finger_touching) * 0.2
                 r_touch = float(is_gripper_touching) * float(is_finger_touching) * 0.5
-                r_grasp     = float(is_grasping) * float(not is_object_above_target) * (1.0 - normalized_gripper_pos) * 0.5 * REWARD_WEIGHTS["grasp"]
+                r_grasp     = float(is_grasping) * float(not is_object_above_container) * (1.0 - normalized_gripper_pos) * 0.5 * REWARD_WEIGHTS["grasp"]
                 r_transport = (0.3 * (-d_block_target_xy) + np.exp(-20 * d_block_target_xy)) * REWARD_WEIGHTS["transport"]
                 r_descend   = np.exp(-20 * block_height) * REWARD_WEIGHTS["descend"]
             elif phase == Phase.RELEASE:
@@ -522,7 +518,7 @@ class BlockPickingEnv(MujocoEnv):
                 r_release = float(not is_finger_touching or not is_gripper_touching) * REWARD_WEIGHTS["release"]
                 # Flat full reward once the block is inside the container; outside,
                 # the exp gradient nudges the block back toward the opening.
-                r_placement_success = float(is_block_in_container) * REWARD_WEIGHTS["placement_success"]
+                r_placement_success = float(is_object_in_container) * REWARD_WEIGHTS["placement_success"]
             elif phase == Phase.ESCAPE:
                 r_release = float(not is_finger_touching or not is_gripper_touching) * REWARD_WEIGHTS["release"]
                 # Gripper must clear the container rim, not just the table top.
@@ -530,11 +526,11 @@ class BlockPickingEnv(MujocoEnv):
                 r_escape = min(ee_above_rim, LIFT_MAX_THRESHOLD) * 10.0 * REWARD_WEIGHTS["escape"]
                 # Flat full reward once the block is inside the container; outside,
                 # the exp gradient nudges the block back toward the opening.
-                r_placement_success = float(is_block_in_container) * REWARD_WEIGHTS["placement_success"]
+                r_placement_success = float(is_object_in_container) * REWARD_WEIGHTS["placement_success"]
             elif phase == Phase.HOME:
                 # Stay clear of the block, keep accuracy reward for keeping
                 # block in container, and pull joints back to INIT_QPOS.
-                r_placement_success = float(is_block_in_container) * REWARD_WEIGHTS["placement_success"]
+                r_placement_success = float(is_object_in_container) * REWARD_WEIGHTS["placement_success"]
                 r_home = np.exp(-3 * joint_dist_to_home) * REWARD_WEIGHTS["home"]
             else:
                 # r_shape = 0.0
@@ -579,12 +575,12 @@ class BlockPickingEnv(MujocoEnv):
             "is_grasping":     bool(is_grasping),
             "is_lifted":       bool(is_lifted),
             "is_success":      bool(is_success),
-            "is_object_above_target": bool(is_object_above_target),
+            "is_object_above_container": bool(is_object_above_container),
             "is_escaped":      bool(is_escaped),
-            "is_block_in_container": bool(is_block_in_container),
+            "is_object_in_container": bool(is_object_in_container),
             "is_robot_touching_container": bool(is_robot_touching_container),
             "container_displacement": container_displacement,
-            "is_block_placed": bool(is_block_placed),
+            "is_object_placed": bool(is_object_placed),
             "is_at_home":      bool(is_at_home),
             "joint_dist_to_home": joint_dist_to_home,
         })
