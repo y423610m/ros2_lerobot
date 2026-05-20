@@ -244,7 +244,7 @@ def evaluate(checkpoint: str, n_episodes: int = 20, render: bool = True) -> None
     # vec_normalize_path = Path(checkpoint).parent / "vec_normalize_final.pkl"
     vec_normalize_path = Path(checkpoint.replace("sac_", "sac_vecnormalize_").replace(".zip", ".pkl"))
 
-    CONFIG["max_episode_steps"] = 1000
+    CONFIG["max_episode_steps"] = 500
 
     env = DummyVecEnv([lambda: Monitor(BlockPickingEnv(
         render_mode="human" if render else None,
@@ -292,7 +292,7 @@ def evaluate(checkpoint: str, n_episodes: int = 20, render: bool = True) -> None
     print(f"  mean length:   {np.mean(lengths):.0f}")
     print(f"  success rate:  {np.mean(successes):.1%}")
 
-    env.close()
+    # env.close()
 
 
 def check(checkpoint: str, n_episodes: int = 20, render: bool = True) -> None:
