@@ -71,16 +71,16 @@ REWARD_WEIGHTS: dict[str, float] = {
     "grasp":           1.0,
     "lift":            2.0,   # multiplier to LIFT_MAX_THRESHOLD (=0.10) -> peak 5.0
     "transport":       2.0,
-    "descend":         3.0,
-    "release":        10.0,
-    "escape":         15.0,   # reward gripper moving away from block in RELEASE
+    "descend":         4.0,
+    "release":         8.0,
+    "escape":         12.0,   # reward gripper moving away from block in RELEASE
     "placement_success": 20.0, # reward block-to-target 3D distance during RELEASE/ESCAPE
     "home":          20.0,   # reward returning joints to INIT_QPOS during HOME phase
     "success":       1000.0,
     "alive_penalty":  -0.5,
     "ctrl_penalty":   -0.1,
-    "container_touch": -1.0,    # per-step penalty while gripper/finger touches container
-    "container_move":  -50.0,   # multiplier on |container displacement (m)| from start
+    "container_touch": -0.5,    # per-step penalty while gripper/finger touches container
+    "container_move":  -1.0,   # multiplier on |container displacement (m)| from start
 }
 
 
@@ -515,18 +515,18 @@ class BlockPickingEnv(MujocoEnv):
                 r_descend   = np.exp(-20 * block_height) * REWARD_WEIGHTS["descend"]
             elif phase == Phase.RELEASE:
                 # r_transport = (0.3 * (-d_block_target_xy) + np.exp(-20 * d_block_target_xy)) * REWARD_WEIGHTS["transport"]
-                r_release = float(not is_finger_touching or not is_gripper_touching) * REWARD_WEIGHTS["release"]
+                r_release = float(not is_finger_touching and not is_gripper_touching and d_ee_block > 0.03) * REWARD_WEIGHTS["release"]
                 # Flat full reward once the block is inside the container; outside,
                 # the exp gradient nudges the block back toward the opening.
-                r_placement_success = float(is_object_in_container) * REWARD_WEIGHTS["placement_success"]
+                r_placement_success = float(is_object_in_container) * 0.25 * REWARD_WEIGHTS["placement_success"]
             elif phase == Phase.ESCAPE:
-                r_release = float(not is_finger_touching or not is_gripper_touching) * REWARD_WEIGHTS["release"]
+                r_release = float(not is_finger_touching and not is_gripper_touching and d_ee_block > 0.03) * REWARD_WEIGHTS["release"]
                 # Gripper must clear the container rim, not just the table top.
                 ee_above_rim = max(0.0, float(ee_pos[2] - (TABLE_Z + CONTAINER_RIM_HEIGHT)))
                 r_escape = min(ee_above_rim, LIFT_MAX_THRESHOLD) * 10.0 * REWARD_WEIGHTS["escape"]
                 # Flat full reward once the block is inside the container; outside,
                 # the exp gradient nudges the block back toward the opening.
-                r_placement_success = float(is_object_in_container) * REWARD_WEIGHTS["placement_success"]
+                r_placement_success = float(is_object_in_container) * 0.50 * REWARD_WEIGHTS["placement_success"]
             elif phase == Phase.HOME:
                 # Stay clear of the block, keep accuracy reward for keeping
                 # block in container, and pull joints back to INIT_QPOS.
