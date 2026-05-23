@@ -668,18 +668,29 @@ class BlockPickingEnv(MujocoEnv):
             r_reach     = 0.0
             r_transport = 0.0
             r_lift      = 0.0
+            r_release   = 0.0
+            r_placement = 0.0
             r_home      = 0.0
             r_ee_height = 0.0
 
-            if not is_object_in_container:
-                # Mode 1: bring block near target while lifted in the height window.
-                r_reach     = (0.3 * (-d_ee_block) + np.exp(-20 * d_ee_block)) * REWARD_WEIGHTS["reach"]
-                r_transport = (0.3 * (-d_block_target_xy) + np.exp(-20 * d_block_target_xy)) * REWARD_WEIGHTS["transport"]
-                r_lift      = self._height_window_bonus(block_height) * REWARD_WEIGHTS["lift"] * 5.0
-            else:
+            if is_object_in_container:
                 # Mode 2: object placed -> return joints to INIT_QPOS, keep EE high.
                 r_home      = np.exp(-3 * joint_dist_to_home) * REWARD_WEIGHTS["home"]
                 r_ee_height = self._height_window_bonus(ee_height) * REWARD_WEIGHTS["lift"] * 5.0
+                r_placement = REWARD_WEIGHTS["placement_success"]
+            else:
+                # Mode 1: bring block near target while lifted in the height window.
+                r_transport = (0.3 * (-d_block_target_xy) + np.exp(-20 * d_block_target_xy)) * REWARD_WEIGHTS["transport"]
+                r_lift      = self._height_window_bonus(block_height) * REWARD_WEIGHTS["lift"] * 5.0
+                if is_object_above_container:
+                    # Block is at target xy -> don't reward EE chasing it (hover trap).
+                    # Reward opening the gripper so the block drops into the container.
+                    if block_height > LIFT_MIN_THRESHOLD:
+                        r_release = float(
+                            not is_gripper_touching and not is_finger_touching
+                        ) * REWARD_WEIGHTS["release"]
+                else:
+                    r_reach = (0.3 * (-d_ee_block) + np.exp(-20 * d_ee_block)) * REWARD_WEIGHTS["reach"]
 
             r_success         = float(is_success) * REWARD_WEIGHTS["success"]
             r_alive           = REWARD_WEIGHTS["alive_penalty"]
@@ -687,13 +698,16 @@ class BlockPickingEnv(MujocoEnv):
             r_container_touch = float(is_robot_touching_container) * REWARD_WEIGHTS["container_touch"]
             r_container_move  = container_displacement * REWARD_WEIGHTS["container_move"]
 
-            reward = (r_reach + r_transport + r_lift + r_home + r_ee_height
+            reward = (r_reach + r_transport + r_lift + r_release + r_placement
+                      + r_home + r_ee_height
                       + r_success + r_alive + r_ctrl
                       + r_container_touch + r_container_move)
             info = {
                 "r_reach":     r_reach,
                 "r_transport": r_transport,
                 "r_lift":      r_lift,
+                "r_release":   r_release,
+                "r_placement": r_placement,
                 "r_home":      r_home,
                 "r_ee_height": r_ee_height,
                 "r_ctrl":      r_ctrl,
