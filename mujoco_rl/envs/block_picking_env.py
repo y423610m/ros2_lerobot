@@ -42,7 +42,7 @@ XML_PATH = Path(__file__).parent.parent / "mujoco_models" / "block_picking.xml"
 CAM_H, CAM_W = 64, 64
 
 TABLE_Z = 0.825
-CONTAINER_RIM_HEIGHT = 0.077          # container rim height above its base (above table)
+CONTAINER_RIM_HEIGHT = 0.046          # container rim height above its base (above table)
 CONTAINER_INTERIOR_HALF_WIDTH = 0.030 # half-width of container interior (outer ~3.8cm minus ~1cm walls)
 LIFT_MIN_THRESHOLD = 0.08   # block must clear container rim (~0.077m above table)
 LIFT_MAX_THRESHOLD = 0.15   # block must clear container rim (~0.077m above table)
