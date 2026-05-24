@@ -815,6 +815,9 @@ class BlockPickingEnv(MujocoEnv):
             r_placement = 0.0
             r_home      = 0.0
             r_ee_height = 0.0
+            r_alive = 0.0
+            r_container_touch = 0.0
+            r_container_move = 0.0
 
             r_success         = float(is_object_placed) * 10
             r_transport = -abs(d_block_target_xy) * float(is_grasping) * 1.0
@@ -823,7 +826,7 @@ class BlockPickingEnv(MujocoEnv):
             r_reach = - abs(d_ee_block) * 0.1
             r_ctrl            = float(np.linalg.norm(action - self.prev_action)) * 0.01
 
-            r_alive           = 0.0
+            # r_alive           = -0.01
             # r_container_touch = float(is_robot_touching_container) * REWARD_WEIGHTS["container_touch"]
             # r_container_move  = container_displacement * REWARD_WEIGHTS["container_move"]
 
