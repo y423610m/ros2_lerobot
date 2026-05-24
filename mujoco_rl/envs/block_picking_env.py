@@ -597,7 +597,7 @@ class BlockPickingEnv(MujocoEnv):
             return 1.0
         return max(0.0, 1.0 - (h - LIFT_MAX_THRESHOLD) / LIFT_MAX_THRESHOLD)
 
-    def _compute_reward(self, action: np.ndarray) -> tuple[float, dict]:
+    def _compute_reward_v2(self, action: np.ndarray) -> tuple[float, dict]:
         ee_gripper = self.data.site_xpos[self._ee_gripper_sid].copy()
         ee_wrist = self.data.site_xpos[self._ee_wrist_sid].copy()
         ee_pos = (ee_gripper + ee_wrist) / 2.0
@@ -698,6 +698,134 @@ class BlockPickingEnv(MujocoEnv):
             r_ctrl            = float(np.linalg.norm(action - self.prev_action)) * REWARD_WEIGHTS["ctrl_penalty"]
             r_container_touch = float(is_robot_touching_container) * REWARD_WEIGHTS["container_touch"]
             r_container_move  = container_displacement * REWARD_WEIGHTS["container_move"]
+
+            reward = (r_reach + r_transport + r_lift + r_descend + r_release + r_placement
+                      + r_home + r_ee_height
+                      + r_success + r_alive + r_ctrl
+                      + r_container_touch + r_container_move)
+            info = {
+                "r_reach":     r_reach,
+                "r_transport": r_transport,
+                "r_lift":      r_lift,
+                "r_descend":   r_descend,
+                "r_release":   r_release,
+                "r_placement": r_placement,
+                "r_home":      r_home,
+                "r_ee_height": r_ee_height,
+                "r_ctrl":      r_ctrl,
+                "r_container_touch": r_container_touch,
+                "r_container_move":  r_container_move,
+                "phase":       int(phase),
+            }
+
+        info.update({
+            "ee_to_block":     d_ee_block,
+            "block_to_target": d_block_target_xy,
+            "block_height":    block_height,
+            "ee_height":       ee_height,
+            "normalized_gripper_pos": float(normalized_gripper_pos),
+            "is_grasping":     bool(is_grasping),
+            "is_lifted":       bool(is_lifted),
+            "is_success":      bool(is_success),
+            "is_object_above_container": bool(is_object_above_container),
+            "is_escaped":      bool(is_escaped),
+            "is_object_in_container": bool(is_object_in_container),
+            "is_robot_touching_container": bool(is_robot_touching_container),
+            "container_displacement": container_displacement,
+            "is_object_placed": bool(is_object_placed),
+            "is_at_home":      bool(is_at_home),
+            "joint_dist_to_home": joint_dist_to_home,
+        })
+        self.prev_action = action.copy()
+        return float(reward), info
+
+    def _compute_reward(self, action: np.ndarray) -> tuple[float, dict]:
+        ee_gripper = self.data.site_xpos[self._ee_gripper_sid].copy()
+        ee_wrist = self.data.site_xpos[self._ee_wrist_sid].copy()
+        ee_pos = (ee_gripper + ee_wrist) / 2.0
+        block_pos = self.data.site_xpos[self._block_sid].copy()
+        target_pos = self.data.site_xpos[self._container_sid].copy()
+
+        d_ee_block        = float(np.linalg.norm(block_pos - ee_pos))
+        d_block_target_xy = float(np.linalg.norm(block_pos[:2] - target_pos[:2]))
+        block_height      = float(block_pos[2] - TABLE_Z)
+        ee_height         = float(ee_pos[2] - TABLE_Z)
+
+        joint_pos = np.array([self.data.qpos[self.model.jnt_qposadr[jid]] for jid in self._joint_ids])
+        normalized_gripper_pos = self.normalize_joint_values(joint_pos)[5]
+
+        is_gripper_touching = self._has_contact("gripper_finger_collision_inner", "block_geom")
+        is_finger_touching  = self._has_contact("moving_jaw_finger_collision_inner", "block_geom")
+        is_robot_touching_container = (
+            self._has_contact("gripper_finger_collision_inner",  "container_collision")
+            or self._has_contact("gripper_finger_collision_outer",  "container_collision")
+            or self._has_contact("moving_jaw_finger_collision_inner", "container_collision")
+            or self._has_contact("moving_jaw_finger_collision_outer", "container_collision")
+        )
+        container_displacement = float(np.linalg.norm(target_pos - self._initial_container_pos))
+
+        is_near_object  = d_ee_block < 0.03
+        is_grasping = (
+            is_gripper_touching
+            and is_finger_touching
+            and self._point_to_line_distance(ee_wrist, ee_gripper, block_pos) < 0.01
+        )
+        is_lifted       = block_height > LIFT_MIN_THRESHOLD
+        is_object_above_container = d_block_target_xy < CONTAINER_INTERIOR_HALF_WIDTH
+        is_object_above_near_container = (
+            is_object_above_container
+            and block_height < CONTAINER_RIM_HEIGHT + 0.04
+        )
+        is_object_in_container = (
+            is_object_above_container
+            and 0 < block_height < CONTAINER_RIM_HEIGHT + 0.01
+        )
+        is_escaped       = d_ee_block > ESCAPE_THRESHOLD
+        is_object_placed = (
+            is_object_in_container
+            and not is_gripper_touching
+            and not is_finger_touching
+            and is_escaped
+        )
+
+        norm_joint = self.normalize_joint_values(joint_pos)
+        norm_home  = self.normalize_joint_values(INIT_QPOS)
+        joint_dist_to_home = float(np.linalg.norm(norm_joint - norm_home))
+        is_at_home = joint_dist_to_home < HOME_TOLERANCE
+
+        # Keep phase tracking updated so external code reading info["phase"] / success still works.
+        self._update_phase(
+            is_near_object, is_grasping, is_lifted,
+            is_gripper_touching, is_finger_touching, block_height,
+            is_object_in_container, is_object_above_container, is_object_above_near_container, is_object_placed,
+        )
+        phase = self._phase
+
+        is_success = is_object_placed
+
+        if self._reward_type == "sparse":
+            reward = 1.0 if is_success else 0.0
+            info: dict = {}
+        else:
+            r_reach     = 0.0
+            r_transport = 0.0
+            r_lift      = 0.0
+            r_descend   = 0.0
+            r_release   = 0.0
+            r_placement = 0.0
+            r_home      = 0.0
+            r_ee_height = 0.0
+
+            r_success         = float(is_object_placed) * 10
+            r_transport = -abs(d_block_target_xy) * float(is_grasping) * 1.0
+            r_grasp = float(is_grasping) * 0.5
+            r_lift = float(is_grasping) * min(block_height, LIFT_MAX_THRESHOLD) * 0.3
+            r_reach = - abs(d_ee_block) * 0.1
+            r_ctrl            = float(np.linalg.norm(action - self.prev_action)) * 0.01
+
+            # r_alive           = -0.01
+            # r_container_touch = float(is_robot_touching_container) * REWARD_WEIGHTS["container_touch"]
+            # r_container_move  = container_displacement * REWARD_WEIGHTS["container_move"]
 
             reward = (r_reach + r_transport + r_lift + r_descend + r_release + r_placement
                       + r_home + r_ee_height
