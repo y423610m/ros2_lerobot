@@ -821,8 +821,10 @@ class BlockPickingEnv(MujocoEnv):
 
             r_success         = float(is_object_placed) * 10
             r_transport = -abs(d_block_target_xy) * float(is_grasping) * 1.0
-            r_grasp = float(is_grasping) * 0.5
-            r_lift = float(is_grasping) * min(block_height, LIFT_MAX_THRESHOLD) * 0.3
+            r_grasp = float(is_grasping) * 0.4
+            r_touch_gripper = float(is_gripper_touching) * 0.15
+            r_touch_finger = float(is_finger_touching) * 0.15
+            r_lift = float(is_grasping) * min(block_height, LIFT_MAX_THRESHOLD) * 10 * 0.3
             r_reach = - abs(d_ee_block) * 0.1
             r_ctrl            = -float(np.linalg.norm(action - self.prev_action)) * 0.01
 
@@ -837,6 +839,9 @@ class BlockPickingEnv(MujocoEnv):
             info = {
                 "r_reach":     r_reach,
                 "r_transport": r_transport,
+                "r_grasp": r_grasp,
+                "r_touch_gripper": r_touch_gripper,
+                "r_touch_finger": r_touch_finger,
                 "r_lift":      r_lift,
                 "r_descend":   r_descend,
                 "r_release":   r_release,
