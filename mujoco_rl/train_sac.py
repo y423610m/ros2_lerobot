@@ -61,7 +61,7 @@ CONFIG: dict = {
     "total_timesteps":   2_000_000,
     "eval_freq":         500_000,
     "n_eval_episodes":   10,
-    "save_freq":         500_000,
+    "max_checkpoints":   30,
     # Paths
     "log_dir":           "logs/",
     "checkpoint_dir":    "checkpoints/",
@@ -201,7 +201,7 @@ def train(render: bool = False) -> SAC:
         LogCallback(log_interval=5_000),
         TBCallback(),
         CheckpointCallback(
-            save_freq=CONFIG["save_freq"] // CONFIG["n_envs"],
+            save_freq=max(1, CONFIG["total_timesteps"] // CONFIG["max_checkpoints"] // CONFIG["n_envs"]),
             save_path=CONFIG["checkpoint_dir"],
             name_prefix="sac",
             save_vecnormalize=True,
