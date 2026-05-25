@@ -72,7 +72,7 @@ REWARD_WEIGHTS: dict[str, float] = {
     "lift":            2.0,   # multiplier to LIFT_MAX_THRESHOLD (=0.10) -> peak 5.0
     "transport":       2.0,
     "descend":         4.0,
-    "open":            6.0,   # smooth gradient that rewards opening the gripper in DESCEND/RELEASE
+    "open":           12.0,   # smooth gradient that rewards opening the gripper in DESCEND/RELEASE
     "release":         8.0,
     "escape":         12.0,   # reward gripper moving away from block in RELEASE
     "placement_success": 20.0, # reward block-to-target 3D distance during RELEASE/ESCAPE
@@ -82,7 +82,7 @@ REWARD_WEIGHTS: dict[str, float] = {
     "ctrl_penalty":   -0.1,
     "container_touch": -0.5,    # per-step penalty while gripper/finger touches container
     "container_move":  -1.0,   # multiplier on |container displacement (m)| from start
-    "hold_penalty":   -2.0,    # per-step penalty for still grasping once block is over container
+    "hold_penalty":   -6.0,    # per-step penalty for still grasping once block is over container
 }
 
 
