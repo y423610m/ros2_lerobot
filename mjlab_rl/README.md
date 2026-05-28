@@ -1,118 +1,111 @@
 # mjlab_rl
 
-SO‑101 arm pick‑and‑place (block → container), with a scripted oracle that
-generates teacher trajectories used to train an MLP policy by Behavior
-Cloning, and a second script that distills that policy into a new (smaller)
-student.
+GPU-batched RL task built on [mjlab](https://github.com/mujocolab/mjlab): SO-101
+arm picks a block and drops it into a container. The whole stack is the
+manager-based env (observations / rewards / events / terminations) plus a PPO
+runner config that plugs into mjlab's bundled `rsl-rl` trainer.
 
-The MuJoCo scene file (`mujoco_models/block_picking.xml`) is reused from
-`mujoco_rl/`; everything else is built from scratch in this workspace.
+> This is a rewrite of the earlier plain-MuJoCo prototype. The old gym-style
+> env, scripted oracle, behavior-cloning and distillation scripts have been
+> removed; mjlab provides a much faster path (batched MuJoCo Warp + PPO from
+> demos-not-needed) to the same end goal.
+
+See `plan.md` for the original design notes.
 
 ## What's in here
 
-| What | Where | Notes |
-|---|---|---|
-| **Env**            | `mjlab_rl/envs/block_picking_env.py` | `BlockPickingEnv`, Gymnasium-compatible. 25-dim state obs (joints, ee, block, container), 6-dim normalized joint-target action. |
-| **Oracle solver**  | `mjlab_rl/solvers/oracle.py`         | `OracleSolver`: closed-loop pose-based state machine (APPROACH→DESCEND→GRASP→LIFT→TRANSFER→DESCEND_PLACE→RELEASE→RETREAT→HOME). Damped least-squares IK with **null-space posture regularization** (strong on wrist_roll) computed on a scratch `MjData`. |
-| **Solver test**    | `scripts/test_solver.py`             | Rolls out the oracle in the env, prints success rate / phase / placement metrics, optional `--video out.mp4` and `--render`. |
-| **BC + DAgger**    | `scripts/train_bc.py`                | (1) Collects N successful oracle demos, (2) MSE-trains the MLP, (3) optional `--dagger-rounds N` DAgger phase where the student rolls out and the *oracle* relabels each visited state. Saves the best checkpoint by env success. |
-| **Policy distill** | `scripts/distill.py`                 | Loads a trained policy as **teacher**, distills it into a new (typically smaller) student with both offline teacher rollouts and DAgger-style student rollouts relabelled by the teacher. |
-| **Eval**           | `scripts/eval_policy.py`             | Replay a saved checkpoint in the env for a few episodes, report success / return, write video. |
+| What | Where |
+|---|---|
+| SO-101 EntityCfg (wraps the URDF/MJCF in `src/lerobot_robots_description`) | `mjlab_rl/assets/so101.py` |
+| Block + container MjSpec helpers                                         | `mjlab_rl/assets/scene_objects.py` |
+| Task-specific MDP terms (reach / lift / place / success)                 | `mjlab_rl/envs/mdp.py` |
+| Env + PPO config and task registration                                   | `mjlab_rl/tasks/block_picking.py` |
+| Train wrapper (delegates to `mjlab.scripts.train`)                       | `scripts/train.py` |
+| Play / eval wrapper                                                      | `scripts/play.py` |
+| CPU smoke test (env construction + a few steps)                          | `scripts/smoke_test.py` |
 
-## Quick start
+The task registers itself as **`Mjlab-SO101-Block-Picking`** at import time.
+
+## Setup
 
 ```bash
 cd mjlab_rl
 uv sync
-
-# 1) Sanity-check the env + oracle.
-uv run python -m scripts.test_solver --episodes 10
-
-# 2) BC training: collect 100 successful demos and train, then 3 DAgger rounds.
-uv run python -m scripts.train_bc \
-    --num-demos 100 --epochs 40 \
-    --eval-every 10 --eval-episodes 10 \
-    --dagger-rounds 3 --dagger-episodes 20 --dagger-epochs 10 \
-    --hidden 256 256
-
-# 3) Distill BC into a smaller (64x64) student.
-uv run python -m scripts.distill \
-    --teacher-ckpt checkpoints/bc.pt \
-    --student-hidden 64 64 \
-    --offline-demos 50 --dagger-rounds 3 --rollouts-per-round 20
-
-# 4) Eval any saved checkpoint and record a video.
-uv run python -m scripts.eval_policy --ckpt checkpoints/student.pt --episodes 10 --video /tmp/student.mp4
 ```
 
-## End-effector site choice (gripperframe)
+`uv sync` will pull `mjlab` (with `mujoco-warp`, `rsl-rl-lib`, `torch`, `warp-lang`).
+GPU training requires a CUDA-capable Warp install; mjlab also runs on CPU
+(slow, single-env) which is what `scripts/smoke_test.py` uses.
 
-The SO101 gripper has **1 DoF actuating 2 fingers**, but only one finger
-moves — the other is fixed to the flange. Sites that live on the moving jaw
-(`ee_gripper`) or on the wrist body (`ee_wrist`) therefore shift in world
-space whenever the gripper opens or closes, which:
+## Quick start
 
-1. Makes the IK target a moving function of the gripper DoF, so the IK loop
-   "chases its own tail" whenever the jaw moves.
-2. Breaks distance-to-block and success metrics, because they implicitly
-   depend on the gripper opening rather than the arm pose.
+```bash
+# 1) Confirm the env builds and steps on CPU.
+uv run python scripts/smoke_test.py
 
-We therefore expose `gripperframe` (a site that the SO101 URDF rigidly
-attaches to the flange) as the EE for both the env (`env.ee_pos()`) and the
-oracle's damped least-squares IK target. The flange-fixed gripperframe pose
-is a function of arm joints 1–5 only — i.e., the gripper DoF (joint 6) does
-not enter the IK Jacobian for position, which is exactly the desired
-behaviour for a 1-DoF asymmetric gripper.
+# 2) List the registered tasks (you should see Mjlab-SO101-Block-Picking).
+uv run python -m mjlab.scripts.list_envs
 
-For convenience the env also computes a constant **grasp-local offset** at
-construction time, derived from the fixed-finger collision geom expressed in
-gripperframe local coords (see `BlockPickingEnv._calibrate_grasp_offset`).
-This is exposed via `env.grasp_offset_world()` and lets downstream code
-recover the world-frame grasp center as `ee_pos + grasp_offset_world()`
-without ever touching the moving `ee_gripper` / `ee_wrist` sites at runtime.
+# 3) Train on GPU with 4096 parallel envs.
+uv run python scripts/train.py Mjlab-SO101-Block-Picking \
+    --env.scene.num-envs 4096 \
+    --agent.max-iterations 5000
 
-## Notes on the oracle
-
-The oracle uses pos-only damped least-squares IK on the EE site. Pos-only IK
-on a 6-DoF arm has multiple solutions; left unregularized the IK tends to
-spin wrist_roll into bizarre poses that drop the held block. The IK adds a
-*null-space* posture term:
-
-```
-dq = J⁺ err  +  (I − J⁺J) · diag(w) · (q_init − q)
+# 4) Play a trained checkpoint in the viewer.
+uv run python scripts/play.py Mjlab-SO101-Block-Picking \
+    --checkpoint-file logs/rsl_rl/so101_block_picking/<run>/model_*.pt
 ```
 
-with `w[wrist_roll]` much larger than the other joints, so the redundant DoFs
-are biased back toward the initial pose without sacrificing task accuracy.
+## Notes on the env
 
-Empirically the oracle reaches ~20–30 % task success across random block /
-container placements. Failures are dominated by (a) the gripper jaw sweeping
-the block during the open→close transition and (b) the block bouncing off
-the container rim on release. Both are addressable with further geometric
-tuning, orientation-aware IK, or a learned residual on top of the oracle —
-all out of scope here.
-
-This oracle quality is *good enough* to drive BC + DAgger; the student can
-exceed the oracle by avoiding the oracle's failure modes once the dataset
-sees a wider state distribution.
+* **Robot:** SO-101 arm via `XmlActuatorCfg` — the existing `<position>`
+  actuators (kp=17.8 from the `sts3215` class) are reused as-is, so action
+  scaling and joint-space PD gains match the real robot.
+* **Action:** 6-D `JointPositionAction` with `use_default_offset=True`; each
+  joint gets its own scale (see `SO101_ACTION_SCALE` in
+  `mjlab_rl/assets/so101.py`). The PPO output is added on top of the home
+  pose so the policy stays in a sane operating region.
+* **Observation groups:**
+  * `actor` (24-d, noisy): joint pos/vel + ee→block + block→container + last action
+  * `critic` (31-d, clean): same as actor plus the block's world pose (privileged)
+* **Reward shape:**
+  | term            | weight |
+  |-----------------|-------:|
+  | reach (gaussian)|   1.0  |
+  | lift (binary)   |   2.0  |
+  | place (gaussian)|   3.0  |
+  | success bonus   |  50.0  |
+  | action_rate_l2  |  -0.01 |
+  | joint_pos_limits|  -5.0  |
+* **End-effector reference:** the flange-fixed `gripperframe` site. This is
+  rigidly attached to the wrist and does *not* shift when the single moving
+  jaw opens/closes, so the policy's ee-to-block vector stays a clean function
+  of arm joints 1–5.
+* **Randomization:** on every reset, the block is placed in
+  `(x ∈ [0.20, 0.35], y ∈ [-0.10, 0.10])` and the container in
+  `(x ∈ [-0.35, -0.20], y ∈ [-0.15, 0.05])`. Robot joints get a small
+  ±0.02 rad perturbation.
+* **Termination:** time-out after 8 s (= 400 env steps at 50 Hz control),
+  early termination if the block falls below `z = -0.05`.
 
 ## Directory layout
 
 ```
 mjlab_rl/
 ├── mjlab_rl/
-│   ├── envs/block_picking_env.py
-│   ├── solvers/oracle.py
-│   └── policies/mlp.py
+│   ├── __init__.py            # registers the task on import
+│   ├── assets/
+│   │   ├── so101.py
+│   │   └── scene_objects.py
+│   ├── envs/
+│   │   └── mdp.py             # task-specific reward / obs / termination terms
+│   └── tasks/
+│       └── block_picking.py   # env_cfg, ppo_cfg, register_mjlab_task(...)
 ├── scripts/
-│   ├── test_solver.py
-│   ├── train_bc.py
-│   ├── distill.py
-│   └── eval_policy.py
-├── mujoco_models/
-│   └── block_picking.xml      # the only file reused from mujoco_rl/; everything else is from scratch
-├── checkpoints/               # saved policies (.pt)
-├── logs/
+│   ├── train.py
+│   ├── play.py
+│   └── smoke_test.py
+├── plan.md
 ├── pyproject.toml
 └── uv.lock
 ```
