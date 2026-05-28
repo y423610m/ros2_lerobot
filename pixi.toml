@@ -18,6 +18,7 @@ train-mujoco = "cd $PIXI_PROJECT_ROOT/mujoco_rl && bash -c 'uv run python train_
 
 tensorboard-mujoco = "pixi run tensorboard --logdir mujoco_rl/logs/ --host 0.0.0.0"
 tensorboard-genesis = "pixi run tensorboard --logdir genesis_rl/logs/ --host 0.0.0.0 --port 6007"
+tensorboard-mjlab = "pixi run tensorboard --logdir mjlab_rl/logs/rsl_rl --host 0.0.0.0 --port 6008"
 
 [activation]
 scripts = ["install/setup.sh"]
