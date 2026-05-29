@@ -167,6 +167,13 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         "asset_cfg": SceneEntityCfg("container"),
       },
     ),
+    # Must run AFTER reset_container_pose so the snapshot captures the
+    # randomized position, not the un-randomized default.
+    "snapshot_container_xy": EventTermCfg(
+      func=task_mdp.snapshot_container_xy,
+      mode="reset",
+      params={"container_name": "container"},
+    ),
   }
 
   rewards = {
@@ -204,6 +211,15 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       func=mdp_rewards.joint_pos_limits,
       weight=-5.0,
       params={"asset_cfg": SceneEntityCfg("robot", joint_names=(".*",))},
+    ),
+    # Discourage knocking the container around. Weight is -10 on squared
+    # XY displacement: a 5 cm push costs 0.025 reward; a 15 cm push costs
+    # 0.225 — comparable to the place reward's peak, so dragging the
+    # container toward the block is not a winning strategy.
+    "container_displacement": RewardTermCfg(
+      func=task_mdp.container_xy_displacement_sq,
+      weight=-10.0,
+      params={"container_name": "container"},
     ),
   }
 

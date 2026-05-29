@@ -137,6 +137,73 @@ def success_bonus(
 
 
 # ---------------------------------------------------------------------------
+# Container "stay-put" buffer + snapshot event + penalty reward.
+#
+# We want to penalise the policy for pushing the container around, but only
+# relative to wherever the container ended up after the per-env randomized
+# reset — not relative to its un-randomized default. So an event snapshots
+# the post-reset XY position into a per-env buffer, and the reward term
+# reads from that buffer.
+#
+# Buffer is keyed by ``id(env)`` so multiple envs in the same process don't
+# clobber each other. In practice there's one env per process under mjlab's
+# normal usage; the dict will hold a single entry whose value is a
+# ``(num_envs, 2)`` tensor.
+# ---------------------------------------------------------------------------
+
+
+_container_init_xy: dict[int, torch.Tensor] = {}
+
+
+def snapshot_container_xy(
+  env: "ManagerBasedRlEnv",
+  env_ids: torch.Tensor | None,
+  container_name: str = "container",
+) -> None:
+  """Reset-mode event: capture each env's container XY *after* it has been
+  randomized. Must be ordered after ``reset_container_pose``.
+
+  Reset events run before mjlab triggers the next ``sim.forward()``, so the
+  entity's data cache is stale when we read it here. Calling ``sim.forward()``
+  ourselves refreshes ``root_link_pos_w`` against the freshly-written sim
+  state.
+  """
+  env.sim.forward()
+
+  container: Entity = env.scene[container_name]
+  current_xy = container.data.root_link_pos_w[:, :2]
+
+  key = id(env)
+  buf = _container_init_xy.get(key)
+  if buf is None or buf.shape[0] != env.num_envs:
+    buf = current_xy.clone()
+    _container_init_xy[key] = buf
+  if env_ids is None:
+    buf.copy_(current_xy)
+  else:
+    buf[env_ids] = current_xy[env_ids]
+
+
+def container_xy_displacement_sq(
+  env: "ManagerBasedRlEnv",
+  container_name: str = "container",
+) -> torch.Tensor:
+  """Squared XY displacement of the container from its snapshotted reset
+  position. Pair with a negative reward weight.
+  """
+  container: Entity = env.scene[container_name]
+  current_xy = container.data.root_link_pos_w[:, :2]
+
+  snapshot = _container_init_xy.get(id(env))
+  if snapshot is None:
+    # No reset has happened yet — return zeros so we don't poison the very
+    # first reward read (rsl-rl calls reward functions during env warm-up).
+    return torch.zeros(env.num_envs, device=current_xy.device)
+
+  return torch.sum((current_xy - snapshot) ** 2, dim=-1)
+
+
+# ---------------------------------------------------------------------------
 # Terminations.
 # ---------------------------------------------------------------------------
 
