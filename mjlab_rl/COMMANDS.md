@@ -120,13 +120,47 @@ watch curves.
 ## Replay a trained policy
 
 ```bash
-# Native viewer.
+# Native viewer (same machine that has the checkpoint).
 uv run python scripts/play.py Mjlab-SO101-Block-Picking \
     --checkpoint-file logs/rsl_rl/so101_block_picking/<run>/model_5000.pt
 
 # Save an mp4 instead of opening a window.
 uv run python scripts/play.py Mjlab-SO101-Block-Picking \
     --checkpoint-file <ckpt.pt> --video True --video-length 400
+```
+
+### Replay on the laptop from a desktop-trained checkpoint (no scp)
+
+Viser ships a self-hosted web viewer that binds to `0.0.0.0:8080`, so the
+desktop can run the policy and the laptop just needs a browser. Two pixi
+tasks in the workspace `pixi.toml` wrap the calls.
+
+**On the desktop** (has the GPU + checkpoint):
+
+```bash
+# Trained policy. CKPT is a path *relative to the ros2_lerobot workspace root*.
+CKPT=mjlab_rl/logs/rsl_rl/so101_block_picking/<run>/model_5000.pt \
+    pixi run play-mjlab-trained
+
+# Or just the static scene (no checkpoint).
+pixi run play-mjlab-zero
+```
+
+**On the laptop**:
+
+```text
+http://<desktop-hostname-or-ip>:8080
+```
+
+If port 8080 isn't exposed on the LAN (firewall, untrusted Wi-Fi), tunnel
+it over SSH instead — runs viser bound to the desktop's loopback, then
+forwards the port to the laptop:
+
+```bash
+# laptop:
+ssh -L 8080:localhost:8080 <user>@<desktop>
+# then in another laptop terminal:
+xdg-open http://localhost:8080   # macOS: open http://localhost:8080
 ```
 
 ## Misc helpers
