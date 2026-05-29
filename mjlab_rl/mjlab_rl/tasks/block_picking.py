@@ -229,6 +229,12 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       func=task_mdp.block_dropped,
       params={"min_z": TABLE_TOP_Z - 0.05, "block_name": "block"},
     ),
+    # Without this, an occasional MuJoCo Warp solver blow-up (one env in
+    # thousands, usually during contact-heavy gripper-on-mesh interactions)
+    # produces a NaN in qpos/qvel → NaN in observations → rsl-rl aborts
+    # training. Listing it as a termination resets just the affected env
+    # before the post-step observation is computed.
+    "nan": TerminationTermCfg(func=mdp_term.nan_detection),
   }
 
   cfg = ManagerBasedRlEnvCfg(
