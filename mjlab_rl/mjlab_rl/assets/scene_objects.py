@@ -24,10 +24,20 @@ CONTAINER_COLLISION_STL = _LEROBOT_MESHES / "container_collision.stl"
 assert CONTAINER_VISUAL_STL.exists(), f"missing {CONTAINER_VISUAL_STL}"
 assert CONTAINER_COLLISION_STL.exists(), f"missing {CONTAINER_COLLISION_STL}"
 
-# Approximate rim height of the container mesh above its own origin. Used to
-# place the ``container_site`` at the interior so the success check has a
-# reasonable goal point. Calibrated to match the original scene.
-CONTAINER_RIM_HEIGHT: float = 0.046
+# Container mesh dimensions, measured directly from container_collision.stl.
+# Body origin sits at the bottom face of the container; the rim is at +Z.
+#
+# Geometry summary:
+#   * Floor at z ≈ 0.000-0.003 (tapered slab)
+#   * Full perimeter rim at z ≈ 0.050  ← this is what bounds the cup
+#   * Two cylindrical posts on one wall extending up to z ≈ 0.077
+#   * Outer wall at 7.6 cm wide, inner cavity 7.0 cm wide → wall ≈ 3 mm
+CONTAINER_RIM_HEIGHT: float = 0.050
+CONTAINER_POLE_HEIGHT: float = 0.077
+CONTAINER_INTERIOR_HALF_WIDTH: float = 0.035
+# Drop-here site z above container floor. Needs to clear the pole tops so
+# the gripper can approach from any direction without colliding with them.
+CONTAINER_DROP_SITE_Z: float = 0.10
 
 
 def _make_block_spec() -> mujoco.MjSpec:
@@ -78,9 +88,13 @@ def _make_container_spec() -> mujoco.MjSpec:
     rgba=(0.0, 0.0, 0.0, 0.0),  # invisible collision proxy
     mass=0.15,
   )
+  # Site above the rim *and* above the pole tops — this is the policy's
+  # "place here" target. Putting it inside the cavity would force the
+  # gripper to plunge into the container; staying just above the rim still
+  # risks gripper-pole collisions for one side approaches.
   body.add_site(
     name="container_site",
-    pos=(0.0, 0.0, CONTAINER_RIM_HEIGHT * 0.5),
+    pos=(0.0, 0.0, CONTAINER_DROP_SITE_Z),
     size=(0.003,),
   )
   return spec

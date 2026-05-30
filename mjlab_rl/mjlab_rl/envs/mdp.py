@@ -117,17 +117,24 @@ def place_block_reward(
 
 def success_bonus(
   env: "ManagerBasedRlEnv",
-  xy_tol: float = 0.045,
-  z_max_above_floor: float = 0.05,
+  xy_tol: float = 0.020,
+  z_max_above_floor: float = 0.055,
   block_name: str = "block",
   container_name: str = "container",
 ) -> torch.Tensor:
-  """``1`` when the block has settled inside the container's interior."""
+  """``1`` when the block has settled inside the container's interior.
+
+  Defaults assume the bundled container mesh (interior half-width 3.5 cm,
+  rim at 5 cm above the body origin) and a 1.5 cm-half-edge block.
+  ``xy_tol`` is what's left of the interior after the block takes up its
+  share (3.5 − 1.5 = 2.0 cm); ``z_max_above_floor`` is the rim height
+  with a little slack.
+  """
   block: Entity = env.scene[block_name]
   container: Entity = env.scene[container_name]
 
   block_pos = block.data.root_link_pos_w
-  container_pos = container.data.root_link_pos_w  # bottom of container
+  container_pos = container.data.root_link_pos_w  # body origin == floor
 
   dxy = block_pos[:, :2] - container_pos[:, :2]
   in_xy = torch.linalg.norm(dxy, dim=-1) < xy_tol
