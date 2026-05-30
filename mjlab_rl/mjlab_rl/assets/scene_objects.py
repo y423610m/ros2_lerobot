@@ -12,7 +12,9 @@ from mjlab.entity import EntityCfg
 BLOCK_HALF_SIZE: float = 0.015
 BLOCK_MASS: float = 0.05
 
-# Container mesh paths — same STLs the original block_picking.xml used.
+# Container visual mesh (rendered only — collision below uses primitive
+# boxes because MuJoCo Warp treats <geom type="mesh"> as the geom's convex
+# hull, which seals the concave cup with an invisible lid).
 _LEROBOT_MESHES = (
   Path(__file__).resolve().parents[3]
   / "src"
@@ -20,14 +22,11 @@ _LEROBOT_MESHES = (
   / "meshes"
 )
 CONTAINER_VISUAL_STL = _LEROBOT_MESHES / "container_visual.stl"
-CONTAINER_COLLISION_STL = _LEROBOT_MESHES / "container_collision.stl"
 assert CONTAINER_VISUAL_STL.exists(), f"missing {CONTAINER_VISUAL_STL}"
-assert CONTAINER_COLLISION_STL.exists(), f"missing {CONTAINER_COLLISION_STL}"
 
-# Container mesh dimensions, measured directly from container_collision.stl.
-# Body origin sits at the bottom face of the container; the rim is at +Z.
-#
-# Geometry summary:
+# Container dimensions, measured from container_collision.stl. Match the
+# visual mesh so the invisible collision boxes line up with what the user
+# sees in the viewer.
 #   * Floor at z ≈ 0.000-0.003 (tapered slab)
 #   * Full perimeter rim at z ≈ 0.050  ← this is what bounds the cup
 #   * Two cylindrical posts on one wall extending up to z ≈ 0.077
@@ -35,6 +34,8 @@ assert CONTAINER_COLLISION_STL.exists(), f"missing {CONTAINER_COLLISION_STL}"
 CONTAINER_RIM_HEIGHT: float = 0.050
 CONTAINER_POLE_HEIGHT: float = 0.077
 CONTAINER_INTERIOR_HALF_WIDTH: float = 0.035
+CONTAINER_WALL_THICKNESS: float = 0.003
+CONTAINER_FLOOR_THICKNESS: float = 0.003
 # Drop-here site z above container floor. Needs to clear the pole tops so
 # the gripper can approach from any direction without colliding with them.
 CONTAINER_DROP_SITE_Z: float = 0.10
@@ -57,21 +58,24 @@ def _make_block_spec() -> mujoco.MjSpec:
 
 
 def _make_container_spec() -> mujoco.MjSpec:
-  """Container using the real ``container_*.stl`` meshes (same as the
-  original block_picking.xml the project shipped before the mjlab rewrite).
+  """Container = visual STL (for rendering) + primitive box walls (for
+  collision). MuJoCo Warp treats ``<geom type="mesh">`` as the geom's
+  convex hull, which seals a concave cup with an invisible lid. We
+  therefore use the STL only for what the user sees, and build the cup's
+  *collision* shape out of five thin boxes (four walls + one floor) sized
+  to match the visual mesh's interior cavity.
 
-  * ``container_visual.stl`` is the high-detail visual mesh (no collision).
-  * ``container_collision.stl`` is the cheap collision proxy (no visual).
+  Total collision mass adds up to ~0.15 kg, matching the prior single
+  mesh-collision geom.
   """
   spec = mujoco.MjSpec()
   spec.meshdir = ""  # we pass absolute paths to add_mesh
-
   spec.add_mesh(name="container_visual", file=str(CONTAINER_VISUAL_STL))
-  spec.add_mesh(name="container_collision", file=str(CONTAINER_COLLISION_STL))
 
   body = spec.worldbody.add_body(name="container")
   body.add_freejoint(name="container_freejoint")
 
+  # Visual only.
   body.add_geom(
     name="container_vis",
     type=mujoco.mjtGeom.mjGEOM_MESH,
@@ -81,17 +85,46 @@ def _make_container_spec() -> mujoco.MjSpec:
     conaffinity=0,
     mass=0.0,
   )
+
+  # Collision geometry — primitive boxes only, all convex, total ≈ 0.15 kg.
+  iw = CONTAINER_INTERIOR_HALF_WIDTH
+  wt = CONTAINER_WALL_THICKNESS
+  ft = CONTAINER_FLOOR_THICKNESS
+  rim_z = CONTAINER_RIM_HEIGHT  # walls span 0 → rim_z above the body origin
+  outer = iw + wt               # outer wall half-extent in the long direction
+
+  # Thin floor slab covering the inner footprint.
   body.add_geom(
-    name="container_collision",
-    type=mujoco.mjtGeom.mjGEOM_MESH,
-    meshname="container_collision",
-    rgba=(0.0, 0.0, 0.0, 0.0),  # invisible collision proxy
-    mass=0.15,
+    name="container_floor_collision",
+    type=mujoco.mjtGeom.mjGEOM_BOX,
+    size=(outer, outer, ft / 2),
+    pos=(0.0, 0.0, ft / 2),
+    rgba=(0.0, 0.0, 0.0, 0.0),
+    mass=0.05,
   )
-  # Site above the rim *and* above the pole tops — this is the policy's
-  # "place here" target. Putting it inside the cavity would force the
-  # gripper to plunge into the container; staying just above the rim still
-  # risks gripper-pole collisions for one side approaches.
+  wall_half_size_xy = (wt / 2, outer, rim_z / 2)  # short side x, long side y
+  wall_half_size_yx = (outer, wt / 2, rim_z / 2)
+  wall_pos_z = ft + rim_z / 2 - ft  # walls reach from the floor's top to rim_z
+  for name, pos, size in (
+    ("container_wall_xp",
+     (iw + wt / 2, 0.0, rim_z / 2), wall_half_size_xy),
+    ("container_wall_xn",
+     (-(iw + wt / 2), 0.0, rim_z / 2), wall_half_size_xy),
+    ("container_wall_yp",
+     (0.0, iw + wt / 2, rim_z / 2), wall_half_size_yx),
+    ("container_wall_yn",
+     (0.0, -(iw + wt / 2), rim_z / 2), wall_half_size_yx),
+  ):
+    body.add_geom(
+      name=name,
+      type=mujoco.mjtGeom.mjGEOM_BOX,
+      size=size,
+      pos=pos,
+      rgba=(0.0, 0.0, 0.0, 0.0),
+      mass=0.025,
+    )
+
+  # Site above the rim — see geometry comments at the top of the file.
   body.add_site(
     name="container_site",
     pos=(0.0, 0.0, CONTAINER_DROP_SITE_Z),
