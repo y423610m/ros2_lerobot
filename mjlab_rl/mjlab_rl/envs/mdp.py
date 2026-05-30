@@ -119,16 +119,21 @@ def success_bonus(
   env: "ManagerBasedRlEnv",
   xy_tol: float = 0.020,
   z_max_above_floor: float = 0.055,
+  min_z_axis_alignment: float = 0.9,
   block_name: str = "block",
   container_name: str = "container",
 ) -> torch.Tensor:
-  """``1`` when the block has settled inside the container's interior.
+  """``1`` when the block has settled inside the container's interior
+  *and* the container is still upright.
 
   Defaults assume the bundled container mesh (interior half-width 3.5 cm,
   rim at 5 cm above the body origin) and a 1.5 cm-half-edge block.
+
   ``xy_tol`` is what's left of the interior after the block takes up its
   share (3.5 − 1.5 = 2.0 cm); ``z_max_above_floor`` is the rim height
-  with a little slack.
+  with a little slack; ``min_z_axis_alignment`` is the cos of the max
+  allowed tilt from vertical (0.9 ≈ 26°). Yaw rotations don't affect
+  success — only tipping does.
   """
   block: Entity = env.scene[block_name]
   container: Entity = env.scene[container_name]
@@ -142,7 +147,15 @@ def success_bonus(
   rel_z = block_pos[:, 2] - container_pos[:, 2]
   in_z = (rel_z > 0.0) & (rel_z < z_max_above_floor)
 
-  return (in_xy & in_z).float()
+  # World-frame z component of the container's local +z axis. For a
+  # (w, x, y, z) quaternion the rotation matrix's bottom-right element is
+  # ``1 - 2(x² + y²)``: =1 when upright, =-1 when fully upside-down,
+  # =0 when tipped 90°.
+  q = container.data.root_link_quat_w
+  z_axis_dot_world_z = 1.0 - 2.0 * (q[:, 1] ** 2 + q[:, 2] ** 2)
+  upright = z_axis_dot_world_z > min_z_axis_alignment
+
+  return (in_xy & in_z & upright).float()
 
 
 # ---------------------------------------------------------------------------
