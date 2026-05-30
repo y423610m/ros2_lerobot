@@ -64,6 +64,22 @@ every episode resets after 8 s and the viewer keeps snapping back to the
 home pose. (Tyro emits the flag as a value-taking option because the field
 name already starts with `no_`, hence the explicit `True`.)
 
+### Seeing the collision shape
+
+Inside the **native MuJoCo viewer**, the number keys `0`–`5` toggle geom
+groups on/off. By convention:
+
+- **group 2** — visual-only geoms (the container's STL mesh)
+- **group 3** — collision-only geoms (the container's invisible box walls;
+  rendered translucent red when shown)
+
+So to see the collision proxy overlaid on the visual cup, press `3` once.
+Press `2` to hide the visual mesh and inspect just the collision shape.
+Press `0` for everything else (table, block, robot links).
+
+In the **viser web viewer**, group toggles live in the right-side panel
+under *Display* → *Geom groups*.
+
 ## Export the compiled scene (for inspection in any MuJoCo viewer)
 
 ```bash

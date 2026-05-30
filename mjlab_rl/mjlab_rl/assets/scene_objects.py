@@ -75,7 +75,8 @@ def _make_container_spec() -> mujoco.MjSpec:
   body = spec.worldbody.add_body(name="container")
   body.add_freejoint(name="container_freejoint")
 
-  # Visual only.
+  # Visual only — group 2 by MuJoCo convention. Toggle in the native
+  # viewer with keyboard '2'.
   body.add_geom(
     name="container_vis",
     type=mujoco.mjtGeom.mjGEOM_MESH,
@@ -84,14 +85,19 @@ def _make_container_spec() -> mujoco.MjSpec:
     contype=0,
     conaffinity=0,
     mass=0.0,
+    group=2,
   )
 
   # Collision geometry — primitive boxes only, all convex, total ≈ 0.15 kg.
+  # Group 3 by MuJoCo convention. Hidden by default; toggle on with
+  # keyboard '3' in the native viewer to inspect the collision proxy.
   iw = CONTAINER_INTERIOR_HALF_WIDTH
   wt = CONTAINER_WALL_THICKNESS
   ft = CONTAINER_FLOOR_THICKNESS
   rim_z = CONTAINER_RIM_HEIGHT  # walls span 0 → rim_z above the body origin
   outer = iw + wt               # outer wall half-extent in the long direction
+  collision_rgba = (0.95, 0.20, 0.20, 0.35)  # translucent red, only visible
+                                              # when group 3 is enabled
 
   # Thin floor slab covering the inner footprint.
   body.add_geom(
@@ -99,12 +105,12 @@ def _make_container_spec() -> mujoco.MjSpec:
     type=mujoco.mjtGeom.mjGEOM_BOX,
     size=(outer, outer, ft / 2),
     pos=(0.0, 0.0, ft / 2),
-    rgba=(0.0, 0.0, 0.0, 0.0),
+    rgba=collision_rgba,
     mass=0.05,
+    group=3,
   )
   wall_half_size_xy = (wt / 2, outer, rim_z / 2)  # short side x, long side y
   wall_half_size_yx = (outer, wt / 2, rim_z / 2)
-  wall_pos_z = ft + rim_z / 2 - ft  # walls reach from the floor's top to rim_z
   for name, pos, size in (
     ("container_wall_xp",
      (iw + wt / 2, 0.0, rim_z / 2), wall_half_size_xy),
@@ -120,8 +126,9 @@ def _make_container_spec() -> mujoco.MjSpec:
       type=mujoco.mjtGeom.mjGEOM_BOX,
       size=size,
       pos=pos,
-      rgba=(0.0, 0.0, 0.0, 0.0),
+      rgba=collision_rgba,
       mass=0.025,
+      group=3,
     )
 
   # Site above the rim — see geometry comments at the top of the file.
