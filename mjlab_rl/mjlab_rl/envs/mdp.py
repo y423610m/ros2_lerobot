@@ -87,14 +87,16 @@ def reach_block_reward(
 
 def lift_block_reward(
   env: "ManagerBasedRlEnv",
-  min_lift: float = 0.02,
+  max_lift: float = 0.10,
   block_name: str = "block",
 ) -> torch.Tensor:
-  """Binary 0/1 reward: block lifted at least ``min_lift`` above its initial z."""
+  """Linear ramp 0 → 1 as the block rises from its initial z up to
+  ``max_lift`` above it. Saturates at 1 for any lift ≥ max_lift, returns 0
+  for negative lift (block pushed into the table)."""
   block: Entity = env.scene[block_name]
   initial_z = block.data.default_root_state[:, 2]
   current_z = block.data.root_link_pos_w[:, 2]
-  return (current_z - initial_z > min_lift).float()
+  return ((current_z - initial_z) / max_lift).clamp(0.0, 1.0)
 
 
 def place_block_reward(

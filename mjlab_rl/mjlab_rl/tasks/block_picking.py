@@ -185,7 +185,7 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     "lift": RewardTermCfg(
       func=task_mdp.lift_block_reward,
       weight=2.0,
-      params={"min_lift": 0.02, "block_name": "block"},
+      params={"max_lift": 0.10, "block_name": "block"},
     ),
     "place": RewardTermCfg(
       func=task_mdp.place_block_reward,

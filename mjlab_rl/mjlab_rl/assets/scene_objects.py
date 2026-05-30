@@ -133,6 +133,9 @@ def get_container_cfg() -> EntityCfg:
   return EntityCfg(
     init_state=EntityCfg.InitialStateCfg(
       pos=(-0.375, -0.125, TABLE_TOP_Z + 0.001),
+      # 180° about world z (mjlab quat order = w, x, y, z), so the mesh's
+      # asymmetric front faces the robot rather than away.
+      rot=(0.0, 0.0, 0.0, 1.0),
     ),
     spec_fn=_make_container_spec,
   )
