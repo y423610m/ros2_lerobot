@@ -20,6 +20,16 @@ tensorboard-mujoco = "pixi run tensorboard --logdir mujoco_rl/logs/ --host 0.0.0
 tensorboard-genesis = "pixi run tensorboard --logdir genesis_rl/logs/ --host 0.0.0.0 --port 6007"
 tensorboard-mjlab = "pixi run tensorboard --logdir mjlab_rl/logs/rsl_rl --host 0.0.0.0 --port 6008"
 
+# Train the SO-101 block-picking task. Defaults: 4096 parallel envs, 5000 iters,
+# tensorboard logger. Override with env vars: NENV=2048 ITER=10000.
+train-mjlab = "cd $PIXI_PROJECT_ROOT/mjlab_rl && bash -c 'uv run python scripts/train.py Mjlab-SO101-Block-Picking --env.scene.num-envs ${NENV:-4096} --agent.max-iterations ${ITER:-5000} --agent.logger tensorboard'"
+
+# Resume from the most recent checkpoint under logs/rsl_rl/so101_block_picking/.
+# mjlab defaults --agent.load-run to ".*" (regex matches all runs, picks latest).
+# To target a specific run/checkpoint:
+#   RUN=2026-05-29_04-23-41 CKPT=model_3.pt pixi run train-mjlab-resume
+train-mjlab-resume = "cd $PIXI_PROJECT_ROOT/mjlab_rl && bash -c 'uv run python scripts/train.py Mjlab-SO101-Block-Picking --env.scene.num-envs ${NENV:-4096} --agent.max-iterations ${ITER:-5000} --agent.logger tensorboard --agent.resume True --agent.load-run ${RUN:-.*} --agent.load-checkpoint ${CKPT:-model_.*.pt}'"
+
 # Browser-replay a trained mjlab policy via viser (binds 0.0.0.0:8080).
 # Open http://<this-host>:8080 from the laptop.
 #   pixi run play-mjlab-trained CKPT=mjlab_rl/logs/rsl_rl/so101_block_picking/<run>/model_5000.pt

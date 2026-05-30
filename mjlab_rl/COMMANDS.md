@@ -80,6 +80,25 @@ needs a display.)
 
 ## Train
 
+### Via pixi (from the workspace root)
+
+```bash
+# Train from scratch with defaults (4096 envs, 5000 iters, tensorboard).
+pixi run train-mjlab
+
+# Override counts via env vars.
+NENV=2048 ITER=10000 pixi run train-mjlab
+
+# Resume from the most recent checkpoint under
+# mjlab_rl/logs/rsl_rl/so101_block_picking/. Verified end-to-end.
+pixi run train-mjlab-resume
+
+# Resume from a specific run / checkpoint.
+RUN=2026-05-29_04-23-41 CKPT=model_3.pt pixi run train-mjlab-resume
+```
+
+### Via the bare script (more flexibility, fewer assumptions)
+
 ```bash
 # (CPU) 2-iteration sanity run — verified end-to-end on this machine.
 # Finishes in ~2 s, writes a model_*.pt + tfevents under logs/rsl_rl/.
@@ -96,13 +115,27 @@ uv run python scripts/train.py Mjlab-SO101-Block-Picking \
     --agent.max-iterations 5000 \
     --agent.logger tensorboard
 
+# Resume the most recent run; mjlab's defaults for --agent.load-run / 
+# --agent.load-checkpoint are regex .* which means "latest".
+uv run python scripts/train.py Mjlab-SO101-Block-Picking \
+    --env.scene.num-envs 4096 --agent.max-iterations 5000 \
+    --agent.logger tensorboard --agent.resume True
+
+# Resume from a specific run and checkpoint.
+uv run python scripts/train.py Mjlab-SO101-Block-Picking \
+    --env.scene.num-envs 4096 --agent.max-iterations 5000 \
+    --agent.logger tensorboard --agent.resume True \
+    --agent.load-run 2026-05-29_04-23-41 \
+    --agent.load-checkpoint model_3.pt
+
 # Record a video every 2000 env steps.
 uv run python scripts/train.py Mjlab-SO101-Block-Picking \
     --video True --video-interval 2000 --video-length 400
 ```
 
 Checkpoints land under `logs/rsl_rl/so101_block_picking/<timestamp>/`. Use
-`tensorboard --logdir logs/rsl_rl/so101_block_picking` while training to
+`tensorboard --logdir logs/rsl_rl/so101_block_picking` (or
+`pixi run tensorboard-mjlab` from the workspace root) while training to
 watch curves.
 
 ### Gotchas you'll otherwise re-hit
