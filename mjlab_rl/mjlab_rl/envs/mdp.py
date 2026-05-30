@@ -115,6 +115,50 @@ def place_block_reward(
   return torch.exp(-d2 / (std**2))
 
 
+def block_deposit_reward(
+  env: "ManagerBasedRlEnv",
+  std_xy: float = 0.025,
+  z_high: float = 0.08,
+  z_low: float = 0.02,
+  block_name: str = "block",
+  container_name: str = "container",
+) -> torch.Tensor:
+  """Dense "block has been deposited inside the cup" reward.
+
+  Product of two smooth gates:
+    * ``gauss(xy)`` — peaks at 1 when the block is centered above the
+      container body's XY, falls off with ``std_xy``.
+    * ``inv_smoothstep(z_above_floor)`` — 0 when the block is at or above
+      ``z_high`` (= above the rim, where the policy can hold the block
+      while gripping), 1 when the block is at or below ``z_low`` (= settled
+      on the cup floor), smooth Hermite in between.
+
+  The crucial property: the product is non-zero only when the block is
+  *low and centered relative to the container body*. The closed gripper
+  is wider than the cup interior, so this region is physically
+  unreachable while held. The only way to claim this reward is to
+  release the block above the cup. That gives the release action explicit
+  dense credit and bridges the gradient gap leading into ``success_bonus``.
+  """
+  block: Entity = env.scene[block_name]
+  container: Entity = env.scene[container_name]
+
+  block_pos = block.data.root_link_pos_w
+  container_pos = container.data.root_link_pos_w
+
+  dxy_sq = torch.sum(
+    (block_pos[:, :2] - container_pos[:, :2]) ** 2, dim=-1
+  )
+  xy_gauss = torch.exp(-dxy_sq / (std_xy**2))
+
+  # Inverted Hermite smoothstep: t=0 at z_high, t=1 at z_low, smooth between.
+  z_rel = block_pos[:, 2] - container_pos[:, 2]
+  t = ((z_high - z_rel) / (z_high - z_low)).clamp(0.0, 1.0)
+  z_gate = t * t * (3.0 - 2.0 * t)
+
+  return xy_gauss * z_gate
+
+
 def success_bonus(
   env: "ManagerBasedRlEnv",
   xy_tol: float = 0.020,

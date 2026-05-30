@@ -196,6 +196,19 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         "container_name": "container",
       },
     ),
+    # Smooth shaping for "block has cleared the rim and is settling into
+    # the cup". Earnable only by releasing the block above the container —
+    # the closed gripper is wider than the cup interior, so this region is
+    # physically unreachable while held. Bridges the gradient gap that was
+    # leaving the policy stuck at a "hover-and-hold" local optimum.
+    "deposit": RewardTermCfg(
+      func=task_mdp.block_deposit_reward,
+      weight=10.0,
+      params={
+        "block_name": "block",
+        "container_name": "container",
+      },
+    ),
     "success": RewardTermCfg(
       func=task_mdp.success_bonus,
       weight=50.0,
@@ -319,7 +332,7 @@ def make_block_picking_ppo_cfg() -> RslRlOnPolicyRunnerCfg:
       value_loss_coef=1.0,
       use_clipped_value_loss=True,
       clip_param=0.2,
-      entropy_coef=0.005,
+      entropy_coef=0.01,
       num_learning_epochs=5,
       num_mini_batches=4,
       learning_rate=1.0e-3,
