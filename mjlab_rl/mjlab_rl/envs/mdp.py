@@ -115,6 +115,47 @@ def place_block_reward(
   return torch.exp(-d2 / (std**2))
 
 
+def gripper_open_above_cup_bonus(
+  env: "ManagerBasedRlEnv",
+  gripper_open_threshold: float = 0.3,
+  xy_tol: float = 0.04,
+  z_min_above_floor: float = 0.04,
+  asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", joint_names=("gripper",)),
+  block_name: str = "block",
+  container_name: str = "container",
+) -> torch.Tensor:
+  """Behavioral bonus: 1 when (gripper is open) AND (block is over the cup).
+
+  Pays for *the act of opening the gripper at a useful moment*, independent
+  of whether the block then actually lands inside the cup. Without this,
+  the policy has no gradient teaching it to ever try opening the gripper —
+  the deposit/success rewards only fire after release succeeds, which is
+  itself the action the policy needs to learn.
+
+  Triggers when ALL three hold:
+    * gripper joint position > ``gripper_open_threshold`` (jaws open),
+    * block xy is within ``xy_tol`` of the container body's xy,
+    * block z is at least ``z_min_above_floor`` above the container body
+      (i.e. block is above the rim, where a release would actually drop
+      it into the cup).
+  """
+  robot: Entity = env.scene[asset_cfg.name]
+  block: Entity = env.scene[block_name]
+  container: Entity = env.scene[container_name]
+
+  gripper_pos = robot.data.joint_pos[:, asset_cfg.joint_ids].squeeze(-1)
+  gripper_open = gripper_pos > gripper_open_threshold
+
+  block_pos = block.data.root_link_pos_w
+  container_pos = container.data.root_link_pos_w
+  xy_close = (
+    torch.linalg.norm(block_pos[:, :2] - container_pos[:, :2], dim=-1) < xy_tol
+  )
+  z_above_rim = (block_pos[:, 2] - container_pos[:, 2]) > z_min_above_floor
+
+  return (gripper_open & xy_close & z_above_rim).float()
+
+
 def block_deposit_reward(
   env: "ManagerBasedRlEnv",
   std_xy: float = 0.025,

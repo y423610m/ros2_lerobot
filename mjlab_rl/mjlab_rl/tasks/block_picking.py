@@ -196,6 +196,20 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         "container_name": "container",
       },
     ),
+    # Behavioral bonus: rewards the act of opening the gripper while the
+    # block is positioned over the container. Pays even if the block then
+    # misses the cup. This is the missing causal signal — without it the
+    # policy never samples a release at the right moment, so it never
+    # discovers the downstream deposit/success rewards.
+    "gripper_open_above_cup": RewardTermCfg(
+      func=task_mdp.gripper_open_above_cup_bonus,
+      weight=5.0,
+      params={
+        "asset_cfg": SceneEntityCfg("robot", joint_names=("gripper",)),
+        "block_name": "block",
+        "container_name": "container",
+      },
+    ),
     # Smooth shaping for "block has cleared the rim and is settling into
     # the cup". Earnable only by releasing the block above the container —
     # the closed gripper is wider than the cup interior, so this region is
@@ -203,7 +217,7 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     # leaving the policy stuck at a "hover-and-hold" local optimum.
     "deposit": RewardTermCfg(
       func=task_mdp.block_deposit_reward,
-      weight=10.0,
+      weight=25.0,
       params={
         "block_name": "block",
         "container_name": "container",
@@ -332,7 +346,7 @@ def make_block_picking_ppo_cfg() -> RslRlOnPolicyRunnerCfg:
       value_loss_coef=1.0,
       use_clipped_value_loss=True,
       clip_param=0.2,
-      entropy_coef=0.01,
+      entropy_coef=0.02,
       num_learning_epochs=5,
       num_mini_batches=4,
       learning_rate=1.0e-3,
