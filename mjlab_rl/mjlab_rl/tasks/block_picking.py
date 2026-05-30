@@ -221,6 +221,15 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       weight=-10.0,
       params={"container_name": "container"},
     ),
+    # Discourage spinning the container in place. Metric is 0 at no
+    # rotation, 0.5 at 90°, 1 at 180°. weight=-2 makes a 90° rotation cost
+    # -1.0 per step (comparable to the lift reward's peak) so the policy
+    # has a strong reason not to use the container as a fidget toy.
+    "container_rotation": RewardTermCfg(
+      func=task_mdp.container_rotation_metric,
+      weight=-2.0,
+      params={"container_name": "container"},
+    ),
   }
 
   terminations = {

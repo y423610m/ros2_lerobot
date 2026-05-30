@@ -155,6 +155,7 @@ def success_bonus(
 
 
 _container_init_xy: dict[int, torch.Tensor] = {}
+_container_init_quat: dict[int, torch.Tensor] = {}
 
 
 def snapshot_container_xy(
@@ -162,8 +163,9 @@ def snapshot_container_xy(
   env_ids: torch.Tensor | None,
   container_name: str = "container",
 ) -> None:
-  """Reset-mode event: capture each env's container XY *after* it has been
-  randomized. Must be ordered after ``reset_container_pose``.
+  """Reset-mode event: capture each env's container XY *and quaternion*
+  after it has been randomized. Must be ordered after
+  ``reset_container_pose``.
 
   Reset events run before mjlab triggers the next ``sim.forward()``, so the
   entity's data cache is stale when we read it here. Calling ``sim.forward()``
@@ -174,16 +176,26 @@ def snapshot_container_xy(
 
   container: Entity = env.scene[container_name]
   current_xy = container.data.root_link_pos_w[:, :2]
+  current_quat = container.data.root_link_quat_w  # (B, 4) wxyz
 
   key = id(env)
-  buf = _container_init_xy.get(key)
-  if buf is None or buf.shape[0] != env.num_envs:
-    buf = current_xy.clone()
-    _container_init_xy[key] = buf
+
+  buf_xy = _container_init_xy.get(key)
+  if buf_xy is None or buf_xy.shape[0] != env.num_envs:
+    buf_xy = current_xy.clone()
+    _container_init_xy[key] = buf_xy
+
+  buf_q = _container_init_quat.get(key)
+  if buf_q is None or buf_q.shape[0] != env.num_envs:
+    buf_q = current_quat.clone()
+    _container_init_quat[key] = buf_q
+
   if env_ids is None:
-    buf.copy_(current_xy)
+    buf_xy.copy_(current_xy)
+    buf_q.copy_(current_quat)
   else:
-    buf[env_ids] = current_xy[env_ids]
+    buf_xy[env_ids] = current_xy[env_ids]
+    buf_q[env_ids] = current_quat[env_ids]
 
 
 def container_xy_displacement_sq(
@@ -203,6 +215,32 @@ def container_xy_displacement_sq(
     return torch.zeros(env.num_envs, device=current_xy.device)
 
   return torch.sum((current_xy - snapshot) ** 2, dim=-1)
+
+
+def container_rotation_metric(
+  env: "ManagerBasedRlEnv",
+  container_name: str = "container",
+) -> torch.Tensor:
+  """Smooth [0, 1] rotation penalty against the snapshotted reset quat.
+
+  Returns ``1 - (q · q_init)^2`` per env. The square makes the metric
+  invariant to quaternion double cover (``q`` and ``-q`` give the same
+  rotation). Scale of the metric:
+      ``θ = 0°   → 0.0``
+      ``θ = 30°  → 0.067``
+      ``θ = 90°  → 0.5``
+      ``θ = 180° → 1.0``
+  Pair with a negative reward weight.
+  """
+  container: Entity = env.scene[container_name]
+  current_q = container.data.root_link_quat_w
+
+  snapshot = _container_init_quat.get(id(env))
+  if snapshot is None:
+    return torch.zeros(env.num_envs, device=current_q.device)
+
+  dot = torch.sum(current_q * snapshot, dim=-1)
+  return 1.0 - dot * dot
 
 
 # ---------------------------------------------------------------------------
