@@ -202,7 +202,7 @@ def block_deposit_reward(
 
 def post_success_home_pose_reward(
   env: "ManagerBasedRlEnv",
-  std: float = 0.6,
+  cutoff: float = 0.5,
   xy_tol: float = 0.020,
   z_max_above_floor: float = 0.055,
   min_z_axis_alignment: float = 0.9,
@@ -212,18 +212,24 @@ def post_success_home_pose_reward(
 ) -> torch.Tensor:
   """Pulls the arm back to its home pose *after* the block is deposited.
 
-  Returns ``deposited * gauss(rms(q - q_home))``, where ``deposited`` is
-  the same boolean condition as :func:`success_bonus` (block in cup,
-  upright) and ``q_home`` is the entity's ``default_joint_pos``. The
-  Gaussian is on the **mean** squared per-joint deviation (not the sum),
-  so ``std`` is interpreted in rad-per-joint terms and the reward scale
-  doesn't shrink to zero as the joint count grows.
+  Returns ``deposited * proximity(q, q_home)``. ``deposited`` is the same
+  boolean condition as :func:`success_bonus` (block in cup, upright);
+  ``q_home`` is the entity's ``default_joint_pos``. The proximity term is
+  a **linear** ramp on the mean per-joint absolute deviation:
 
-  Sample values with ``std=0.6``:
-    * every joint at home          ⇒ 1.0
-    * every joint 0.3 rad off (~17°) ⇒ 0.78
-    * every joint 0.6 rad off (~34°) ⇒ 0.37
-    * every joint 1.0 rad off (~57°) ⇒ 0.06
+      proximity = clamp(1 − mean(|q − q_home|) / cutoff, 0, 1)
+
+  Linear (vs the earlier Gaussian) gives a constant gradient toward home
+  regardless of how close the policy already is, so the policy doesn't
+  plateau at a "good enough" near-home pose. ``cutoff`` is the
+  per-joint-rad mean at which the proximity hits zero; smaller cutoff =
+  steeper gradient.
+
+  Sample values with ``cutoff=0.5``:
+    * every joint at home              ⇒ 1.0
+    * every joint 0.1 rad off (~6°)    ⇒ 0.80
+    * every joint 0.3 rad off (~17°)   ⇒ 0.40
+    * every joint 0.5 rad off (~29°)   ⇒ 0.00
   """
   robot: Entity = env.scene[asset_cfg.name]
   block: Entity = env.scene[block_name]
@@ -242,8 +248,8 @@ def post_success_home_pose_reward(
 
   joint_pos = robot.data.joint_pos[:, asset_cfg.joint_ids]
   joint_home = robot.data.default_joint_pos[:, asset_cfg.joint_ids]
-  d2_mean = torch.mean((joint_pos - joint_home) ** 2, dim=-1)
-  home_proximity = torch.exp(-d2_mean / (std**2))
+  mean_abs_dev = torch.mean(torch.abs(joint_pos - joint_home), dim=-1)
+  home_proximity = (1.0 - mean_abs_dev / cutoff).clamp(0.0, 1.0)
 
   return deposited.float() * home_proximity
 

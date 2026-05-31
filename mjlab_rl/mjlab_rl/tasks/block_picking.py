@@ -241,7 +241,7 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       func=task_mdp.post_success_home_pose_reward,
       weight=10.0,
       params={
-        "std": 0.6,
+        "cutoff": 0.5,
         "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
         "block_name": "block",
         "container_name": "container",
