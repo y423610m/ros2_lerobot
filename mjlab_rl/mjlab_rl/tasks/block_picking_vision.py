@@ -69,10 +69,16 @@ def make_block_picking_vision_env_cfg(play: bool = False):
     height=64,
     width=64,
     data_types=("rgb",),
-    # 0 = default, 2 = the visual "class" group used by SO-101 mesh geoms,
-    # 3 = collision class (so the table + container collision boxes show up
-    # too). Lights and skybox stay rendered.
-    enabled_geom_groups=(0, 2, 3),
+    # Visual-only rendering:
+    #   * 0 = default group — block, table.
+    #   * 2 = visual class — SO-101 mesh geoms (full jaw shape included)
+    #         and the container's STL visual.
+    # Group 3 (collision class) is intentionally excluded, so the
+    # container's translucent-red collision boxes and the SO-101's
+    # invisible finger collision primitives don't appear in the camera
+    # frames. The viewer keyboard toggle for group 3 still works as a
+    # debug tool.
+    enabled_geom_groups=(0, 2),
     use_textures=True,
     use_shadows=False,
   )
