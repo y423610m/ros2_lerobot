@@ -11,7 +11,7 @@ env:
 robot:
   urdf_path: "src/lerobot_robots_description/urdf/SO101/so101_new_calib.xml"
   robot_name: "so101_new_calib"
-  default_joint_pos: [0.0, -1.0, 1.0, 0.5, 0.0, 0.0]
+  default_joint_pos: [0.0, -0.5, 1.0, 0.0, 0.0, 0.0]
   joint_limits:
     lower: -1.57
     upper: 1.57

@@ -37,15 +37,17 @@ SO101_JOINT_NAMES: tuple[str, ...] = (
 ARM_JOINT_NAMES: tuple[str, ...] = SO101_JOINT_NAMES[:5]
 GRIPPER_JOINT_NAME: str = SO101_JOINT_NAMES[5]
 
-# Joint position targets at episode start. Values were copied from the original
-# scripted oracle's home pose; keeps the arm comfortably above the table.
+# Joint position targets at episode start. Lifts the arm well clear of the
+# tabletop so a wrist-mounted camera has a clean view of the workspace and
+# the arm itself doesn't occlude objects sitting near the robot's base.
+# Matches the genesis_rl env_config.yaml `default_joint_pos`.
 HOME_JOINT_POS: dict[str, float] = {
   "shoulder_pan": 0.0,
-  "shoulder_lift": -0.3,
-  "elbow_flex": 0.6,
-  "wrist_flex": 0.3,
+  "shoulder_lift": -1.0,
+  "elbow_flex": 1.0,
+  "wrist_flex": 0.5,
   "wrist_roll": 0.0,
-  "gripper": 0.02,
+  "gripper": 0.0,
 }
 
 # Approximate distance (radians) each joint can move per env step. The PPO
