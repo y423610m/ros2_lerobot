@@ -9,7 +9,7 @@ lift-to-target-pose task — no ``LiftingCommand`` involved).
 from __future__ import annotations
 
 from mjlab.envs import ManagerBasedRlEnvCfg
-from mjlab.envs.mdp import actions as mdp_actions
+from mjlab.envs.mdp import actions as mdp_actions  # noqa: F401  (kept for compat)
 from mjlab.envs.mdp import events as mdp_events
 from mjlab.envs.mdp import observations as mdp_obs
 from mjlab.envs.mdp import rewards as mdp_rewards
@@ -46,6 +46,7 @@ from mjlab_rl.assets import (
   get_table_cfg,
 )
 from mjlab_rl.envs import mdp as task_mdp
+from mjlab_rl.envs.actions import RateLimitedJointPositionActionCfg
 
 # ----------------------------------------------------------------------------
 # Geometry / randomization ranges. All numbers are in meters / radians.
@@ -112,11 +113,23 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   }
 
   actions: dict[str, ActionTermCfg] = {
-    "joint_pos": mdp_actions.JointPositionActionCfg(
+    "joint_pos": RateLimitedJointPositionActionCfg(
       entity_name="robot",
       actuator_names=(".*",),
       scale=SO101_ACTION_SCALE,
       use_default_offset=True,
+      # Per-step (env-step = 20 ms at decimation=4, timestep=0.005) max delta
+      # from the present joint position. Mirrors lerobot's SOFollower
+      # send_action safety clamp. 0.1 rad/step ≈ 5 rad/s, in line with what
+      # the real STS-3215 servos can comfortably do.
+      max_relative_target={
+        "shoulder_pan": 0.1,
+        "shoulder_lift": 0.1,
+        "elbow_flex": 0.1,
+        "wrist_flex": 0.1,
+        "wrist_roll": 0.1,
+        "gripper": 0.3,  # gripper snaps faster
+      },
     ),
   }
 
