@@ -202,7 +202,7 @@ def block_deposit_reward(
 
 def post_success_home_pose_reward(
   env: "ManagerBasedRlEnv",
-  std: float = 0.5,
+  std: float = 0.6,
   xy_tol: float = 0.020,
   z_max_above_floor: float = 0.055,
   min_z_axis_alignment: float = 0.9,
@@ -212,13 +212,18 @@ def post_success_home_pose_reward(
 ) -> torch.Tensor:
   """Pulls the arm back to its home pose *after* the block is deposited.
 
-  Returns ``deposited * gauss(||q - q_home||)``, where ``deposited`` is the
-  same boolean condition as :func:`success_bonus` (block in cup, upright)
-  and ``q_home`` is the entity's ``default_joint_pos`` (set by the
-  EntityCfg's ``InitialStateCfg``). Until the block is in the container
-  this term is zero, so it doesn't interfere with reach/lift/place
-  shaping. After success it gives the policy a smooth gradient toward
-  staying at the home pose instead of wandering.
+  Returns ``deposited * gauss(rms(q - q_home))``, where ``deposited`` is
+  the same boolean condition as :func:`success_bonus` (block in cup,
+  upright) and ``q_home`` is the entity's ``default_joint_pos``. The
+  Gaussian is on the **mean** squared per-joint deviation (not the sum),
+  so ``std`` is interpreted in rad-per-joint terms and the reward scale
+  doesn't shrink to zero as the joint count grows.
+
+  Sample values with ``std=0.6``:
+    * every joint at home          ⇒ 1.0
+    * every joint 0.3 rad off (~17°) ⇒ 0.78
+    * every joint 0.6 rad off (~34°) ⇒ 0.37
+    * every joint 1.0 rad off (~57°) ⇒ 0.06
   """
   robot: Entity = env.scene[asset_cfg.name]
   block: Entity = env.scene[block_name]
@@ -235,11 +240,10 @@ def post_success_home_pose_reward(
   upright = (1.0 - 2.0 * (q[:, 1] ** 2 + q[:, 2] ** 2)) > min_z_axis_alignment
   deposited = in_xy & in_z & upright
 
-  # Gaussian on full L2 joint deviation from the home pose.
   joint_pos = robot.data.joint_pos[:, asset_cfg.joint_ids]
   joint_home = robot.data.default_joint_pos[:, asset_cfg.joint_ids]
-  d2 = torch.sum((joint_pos - joint_home) ** 2, dim=-1)
-  home_proximity = torch.exp(-d2 / (std**2))
+  d2_mean = torch.mean((joint_pos - joint_home) ** 2, dim=-1)
+  home_proximity = torch.exp(-d2_mean / (std**2))
 
   return deposited.float() * home_proximity
 
