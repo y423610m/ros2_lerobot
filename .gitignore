@@ -21,7 +21,6 @@ __pycache__/
 # AI Model Files
 QWEN.md
 GEMINI.md
-CLAUDE.md
 
 # AI assistant directories
 .qwen/
