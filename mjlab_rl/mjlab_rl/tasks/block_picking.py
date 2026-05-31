@@ -29,6 +29,7 @@ from mjlab.rl import (
   RslRlPpoAlgorithmCfg,
 )
 from mjlab.scene import SceneCfg
+from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.tasks.manipulation.rl import ManipulationOnPolicyRunner
 from mjlab.tasks.registry import register_mjlab_task
@@ -270,6 +271,14 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       weight=-2.0,
       params={"container_name": "container"},
     ),
+    # Penalise any gripper-on-table contact. Sensor primary = gripper subtree
+    # (catches both the wrist body and the moving-jaw child body), secondary
+    # = table_top geom. Fires 1.0/step while in contact.
+    "gripper_table_contact": RewardTermCfg(
+      func=task_mdp.sensor_contact_penalty,
+      weight=-5.0,
+      params={"sensor_name": "gripper_table_contact"},
+    ),
   }
 
   terminations = {
@@ -286,6 +295,16 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     "nan": TerminationTermCfg(func=mdp_term.nan_detection),
   }
 
+  gripper_table_contact_cfg = ContactSensorCfg(
+    name="gripper_table_contact",
+    primary=ContactMatch(mode="subtree", pattern="gripper", entity="robot"),
+    secondary=ContactMatch(mode="geom", pattern="table_top", entity="table"),
+    fields=("found",),
+    reduce="none",
+    num_slots=1,
+    history_length=1,
+  )
+
   cfg = ManagerBasedRlEnvCfg(
     scene=SceneCfg(
       terrain=TerrainEntityCfg(terrain_type="plane"),
@@ -297,6 +316,7 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         "block": get_block_cfg(),
         "container": get_container_cfg(),
       },
+      sensors=(gripper_table_contact_cfg,),
     ),
     observations=observations,
     actions=actions,

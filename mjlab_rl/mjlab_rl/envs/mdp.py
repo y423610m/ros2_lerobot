@@ -397,6 +397,26 @@ def container_rotation_metric(
 
 
 # ---------------------------------------------------------------------------
+# Contact-sensor-based rewards.
+# ---------------------------------------------------------------------------
+
+
+def sensor_contact_penalty(
+  env: "ManagerBasedRlEnv",
+  sensor_name: str,
+) -> torch.Tensor:
+  """Returns 1.0 per env if any contact registered by the named
+  ContactSensor is active this step, else 0.0. Pair with a negative
+  weight to penalise the contact.
+  """
+  sensor = env.scene[sensor_name]
+  found = sensor.data.found
+  if found is None:
+    return torch.zeros(env.num_envs, device=env.device)
+  return torch.any(found, dim=-1).float()
+
+
+# ---------------------------------------------------------------------------
 # Terminations.
 # ---------------------------------------------------------------------------
 
