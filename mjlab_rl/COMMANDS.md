@@ -166,6 +166,72 @@ watch curves.
 > visible). The CPU sanity run above was — it iterates the PPO loop, writes
 > checkpoints, and saves tfevents.
 
+## Vision variant — `Mjlab-SO101-Block-Picking-Rgb`
+
+Same env as the state-only task plus two 64×64 RGB cameras (the SO-101's
+existing wrist-mounted `hand_eye` + a new top-down camera attached to the
+table body). **Asymmetric PPO**: the actor sees joint state + camera, the
+critic keeps the privileged ground-truth observations. Both tasks coexist
+— the state-only `Mjlab-SO101-Block-Picking` is unchanged.
+
+### Check the camera views
+
+The fastest way is the **headless render helper** — no display needed:
+
+```bash
+# Captures one frame per camera, writes PNGs into mjlab_rl/.
+pixi run render-mjlab-cameras
+# -> mjlab_rl/wrist_cam.png  (3×64×64)
+# -> mjlab_rl/top_cam.png    (3×64×64)
+# Run again any time you change the camera pos/quat/fovy in
+# block_picking_vision.py to re-render.
+```
+
+Or open the interactive viewer (Viser web UI shows live camera feeds in
+the right sidebar):
+
+```bash
+pixi run play-mjlab-vision-zero
+# Browser: http://<this-host>:8080 → right sidebar "Cameras"
+```
+
+### Train
+
+```bash
+# Standard run: 4096 envs, 10000 iters, tensorboard logger.
+pixi run train-mjlab-vision
+
+# Tweak counts via env vars.
+NENV=2048 ITER=20000 pixi run train-mjlab-vision
+
+# Or bare script.
+uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb \
+    --env.scene.num-envs 4096 --agent.max-iterations 10000 \
+    --agent.logger tensorboard
+```
+
+### Replay a trained vision policy
+
+```bash
+CKPT=mjlab_rl/logs/rsl_rl/so101_block_picking_vision/<run>/model_*.pt \
+    pixi run play-mjlab-vision-trained
+```
+
+### Caveats
+
+- **Vision is sample-hungry.** Expect 10–100× more iterations than the
+  state-only task before `Episode_Reward/success` rises. Watch the curves
+  in TensorBoard (`pixi run tensorboard-mjlab`).
+- **Render cost.** 2 cams × 64×64 × 4096 envs adds noticeable per-step
+  overhead. Iteration time will be larger than state-only on the same
+  hardware.
+- **Can't resume the state-only checkpoint.** Different actor input
+  shape; train fresh.
+- **Verify the camera frames before a long run.** `render-mjlab-cameras`
+  takes ~15 s on CPU. If the top camera doesn't actually show both the
+  block and the container, edit `top_cam`'s `pos`/`quat`/`fovy` in
+  `mjlab_rl/mjlab_rl/tasks/block_picking_vision.py`.
+
 ## Replay a trained policy
 
 ```bash
