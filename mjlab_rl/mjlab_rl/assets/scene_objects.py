@@ -169,6 +169,18 @@ def _make_table_spec() -> mujoco.MjSpec:
     pos=(0.0, -(TABLE_HALF_SIZE[1] + 0.01), TABLE_TOP_Z + 0.30),
     rgba=(1.0, 1.0, 1.0, 1.0),
   )
+  # White 10×10 cm mat directly under the SO-101 base. Visual only — gives
+  # the camera a consistent landmark to the real robot's calibration pad.
+  # Robot base is at world (-0.40, 0.25, 0.825); mat centre matches.
+  body.add_geom(
+    name="robot_base_mat",
+    type=mujoco.mjtGeom.mjGEOM_BOX,
+    size=(0.075, 0.075, 0.0015),  # 15 cm × 15 cm × 3 mm
+    pos=(-0.40, 0.2, TABLE_TOP_Z + 0.0015 + 1e-4),  # sit on tabletop
+    rgba=(1.0, 1.0, 1.0, 1.0),
+    contype=0,
+    conaffinity=0,
+  )
 
   # Three extra directional lights aimed at the workspace centre. Combined
   # with the existing "sun" light, the scene has 4 lights — randomly
