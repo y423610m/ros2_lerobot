@@ -107,12 +107,17 @@ def make_block_picking_vision_env_cfg(play: bool = False):
 
   # --- Observations -----------------------------------------------------
   # Strip privileged distance terms from the actor; it must learn them
-  # from pixels.
+  # from pixels. Also drop joint_vel: lerobot's SOFollower.get_observation
+  # only reads Present_Position from the motors, so the real arm doesn't
+  # expose a velocity channel. Removing it here keeps the sim actor's
+  # input shape consistent with what's available at deploy time.
   actor_obs = cfg.observations["actor"]
   actor_obs.terms.pop("ee_to_block")
   actor_obs.terms.pop("block_to_container")
-  # Actor keeps: joint_pos, joint_vel, actions  (18-dim).
-  # Critic is untouched and still has the full privileged state.
+  actor_obs.terms.pop("joint_vel")
+  # Actor keeps: joint_pos, actions  (12-dim).
+  # Critic is untouched and still has the full privileged state (incl.
+  # joint_vel — fine, the critic only runs in sim).
 
   # Camera group — concatenated along channel dim (6 = 2 cams × 3 RGB).
   cam_terms = {

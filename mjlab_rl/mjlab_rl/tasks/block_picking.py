@@ -118,17 +118,17 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       actuator_names=(".*",),
       scale=SO101_ACTION_SCALE,
       use_default_offset=True,
-      # Per-step (env-step = 20 ms at decimation=4, timestep=0.005) max delta
-      # from the present joint position. Mirrors lerobot's SOFollower
-      # send_action safety clamp. 0.1 rad/step ≈ 5 rad/s, in line with what
+      # Per-step (env-step = 100 ms at decimation=20, timestep=0.005) max
+      # delta from the present joint position. Mirrors lerobot's SOFollower
+      # send_action safety clamp. 0.5 rad/step ≈ 5 rad/s, in line with what
       # the real STS-3215 servos can comfortably do.
       max_relative_target={
-        "shoulder_pan": 0.1,
-        "shoulder_lift": 0.1,
-        "elbow_flex": 0.1,
-        "wrist_flex": 0.1,
-        "wrist_roll": 0.1,
-        "gripper": 0.3,  # gripper snaps faster
+        "shoulder_pan": 0.5,
+        "shoulder_lift": 0.5,
+        "elbow_flex": 0.5,
+        "wrist_flex": 0.5,
+        "wrist_roll": 0.5,
+        "gripper": 1.5,  # gripper snaps faster
       },
     ),
   }
@@ -363,7 +363,7 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         cone="elliptic",
       ),
     ),
-    decimation=4,
+    decimation=20,  # 20 * 5 ms physics step = 100 ms env step = 10 Hz control
     episode_length_s=8.0,
   )
 
