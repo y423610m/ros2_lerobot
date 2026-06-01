@@ -188,6 +188,14 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       mode="reset",
       params={"container_name": "container"},
     ),
+    # Randomize which scene lights are active per env — gives bright/dim/
+    # angled-shadow variation each episode. 4 lights × Bernoulli(0.6) →
+    # ~2.4 on average. ensure_one_on prevents pitch-black scenes.
+    "randomize_lights": EventTermCfg(
+      func=task_mdp.randomize_light_active,
+      mode="reset",
+      params={"p_on": 0.6, "ensure_one_on": True},
+    ),
   }
 
   rewards = {

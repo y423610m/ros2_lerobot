@@ -95,10 +95,12 @@ def make_block_picking_vision_env_cfg(play: bool = False):
   top_cam = CameraSensorCfg(
     name="top_cam",
     parent_body="table/table",
-    pos=(-0.39, -0.02, 1.30),  # 1.30 m above the table-mocap origin
+    pos=(-0.34, -0.02, 1.30),  # 1.30 m above the table-mocap origin
                                 # = ~48 cm above the 0.825 m tabletop
-    quat=(1.0, 0.0, 0.0, 0.0),  # identity → camera local -z = world -z
-                                # = looks straight down
+    # Still looks straight down (local -z = world -z), but rotated 90° about
+    # the world z axis so the image's vertical axis tracks the table's x
+    # axis rather than y. quat = cos(45°), 0, 0, sin(45°).
+    quat=(0.7071068, 0.0, 0.0, 0.7071068),
     **shared,
   )
   cfg.scene.sensors = (cfg.scene.sensors or ()) + (wrist_cam, top_cam)

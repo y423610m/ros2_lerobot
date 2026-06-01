@@ -43,10 +43,10 @@ GRIPPER_JOINT_NAME: str = SO101_JOINT_NAMES[5]
 # Matches the genesis_rl env_config.yaml `default_joint_pos`.
 HOME_JOINT_POS: dict[str, float] = {
   "shoulder_pan": 0.0,
-  "shoulder_lift": -1.0,
-  "elbow_flex": 1.0,
-  "wrist_flex": 0.5,
-  "wrist_roll": 0.0,
+  "shoulder_lift": -1.2,
+  "elbow_flex": 0.0,
+  "wrist_flex": 1.5,
+  "wrist_roll": -1.5,
   "gripper": 0.0,
 }
 

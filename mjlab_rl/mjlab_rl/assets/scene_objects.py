@@ -155,8 +155,33 @@ def _make_table_spec() -> mujoco.MjSpec:
     type=mujoco.mjtGeom.mjGEOM_BOX,
     size=TABLE_HALF_SIZE,
     pos=(0.0, 0.0, TABLE_TOP_Z - TABLE_HALF_SIZE[2]),
-    rgba=(0.60, 0.50, 0.40, 1.0),
+    rgba=(0.1, 0.1, 0.1, 0.9),
   )
+  # White backdrop wall along the -y edge of the table. Gives the cameras a
+  # clean uniform background behind the workspace (helps sim-to-real
+  # contrast for vision policies). Slightly outside the table footprint so
+  # block/container can sit flush at the edge if randomization pushes them.
+  body.add_geom(
+    name="backdrop_wall",
+    type=mujoco.mjtGeom.mjGEOM_BOX,
+    size=(TABLE_HALF_SIZE[0], 0.01, 0.25),  # 1.2 m wide × 2 cm thick × 60 cm tall
+    pos=(0.0, -(TABLE_HALF_SIZE[1] + 0.01), TABLE_TOP_Z + 0.30),
+    rgba=(1.0, 1.0, 1.0, 1.0),
+  )
+
+  # Three extra directional lights aimed at the workspace centre. Combined
+  # with the existing "sun" light, the scene has 4 lights — randomly
+  # toggling each on/off per episode gives a wide range of brightness
+  # (1 light = dim, 4 lights = bright) and direction (front/back/side
+  # shadows). See `mjlab_rl.envs.mdp.randomize_light_active`.
+  light_z = TABLE_TOP_Z + 0.80
+  for name, lpos, ldir in (
+    ("table_light_overhead",  (-0.40,  0.00, light_z), (0.0,  0.0, -1.0)),
+    ("table_light_front",     (-0.40, +0.40, light_z), (0.0, -0.4, -1.0)),
+    ("table_light_back",      (-0.40, -0.40, light_z), (0.0, +0.4, -1.0)),
+  ):
+    body.add_light(name=name, pos=lpos, dir=ldir,
+                   type=mujoco.mjtLightType.mjLIGHT_DIRECTIONAL)
   return spec
 
 

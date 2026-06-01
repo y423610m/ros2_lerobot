@@ -213,8 +213,8 @@ uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb \
 ### Replay a trained vision policy
 
 ```bash
-CKPT=mjlab_rl/logs/rsl_rl/so101_block_picking_vision/<run>/model_*.pt \
-    pixi run play-mjlab-vision-trained
+    CKPT=mjlab_rl/logs/rsl_rl/so101_block_picking_vision/<run>/model_*.pt \
+        pixi run play-mjlab-vision-trained
 ```
 
 ### Caveats

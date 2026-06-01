@@ -427,6 +427,39 @@ def sensor_contact_penalty(
 # ---------------------------------------------------------------------------
 
 
+def randomize_light_active(
+  env: "ManagerBasedRlEnv",
+  env_ids: torch.Tensor | None,
+  p_on: float = 0.6,
+  ensure_one_on: bool = True,
+) -> None:
+  """Reset-mode event: toggle each scene light to ``active=True`` with
+  probability ``p_on``.
+
+  Combined with the four table-attached directional lights this gives a
+  wide range of brightness — 1 light = dim, 4 lights = bright, plus
+  side-lit / top-lit variations depending on which combination is on.
+
+  Caveat: mujoco_warp **shares one set of lights across all envs**
+  (the underlying ``light_active`` warp buffer has shape ``(1, nlight)``
+  with a stride-0 batch dim, even though mjlab exposes it as
+  ``(num_envs, nlight)``). Each reset call randomizes the global
+  lighting, so brightness varies *between* episodes but is identical
+  across the batch at any given moment. Still useful as domain
+  randomization — over a long training run the policy sees thousands of
+  lighting conditions.
+  """
+  light_active = env.sim.model.light_active
+  num_lights = light_active.shape[1]
+
+  # Single random draw — writes are broadcast across the batch anyway.
+  new_active = torch.rand(num_lights, device=env.device) < p_on
+  if ensure_one_on and not new_active.any():
+    new_active[torch.randint(0, num_lights, (1,)).item()] = True
+
+  light_active[0] = new_active
+
+
 def block_dropped(
   env: "ManagerBasedRlEnv",
   min_z: float = -0.05,
