@@ -66,8 +66,8 @@ def make_block_picking_vision_env_cfg(play: bool = False):
 
   # --- Cameras ----------------------------------------------------------
   shared = dict(
-    height=64,
-    width=64,
+    height=64*2,
+    width=64*2,
     data_types=("rgb",),
     # Visual-only rendering:
     #   * 0 = default group — block, table.
