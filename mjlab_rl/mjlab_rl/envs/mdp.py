@@ -261,6 +261,46 @@ def post_success_home_pose_reward(
   return deposited.float() * home_proximity
 
 
+def post_success_joint_vel_l2(
+  env: "ManagerBasedRlEnv",
+  xy_tol: float = 0.020,
+  z_max_above_floor: float = 0.055,
+  min_z_axis_alignment: float = 0.9,
+  gripper_open_threshold: float = 0.3,
+  gripper_asset_cfg: SceneEntityCfg = SceneEntityCfg(
+    "robot", joint_names=("gripper",)
+  ),
+  asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", joint_names=(".*",)),
+  block_name: str = "block",
+  container_name: str = "container",
+) -> torch.Tensor:
+  """Sum of squared joint velocities, gated on the same deposit/release
+  condition as :func:`success_bonus`.
+
+  Pair with a small negative weight to damp the "dancing at home" jitter
+  the policy exhibits after a successful placement. Pre-deposit this term
+  is zero, so reach/lift/transport speed is not constrained.
+  """
+  robot: Entity = env.scene[asset_cfg.name]
+  block: Entity = env.scene[block_name]
+  container: Entity = env.scene[container_name]
+
+  block_pos = block.data.root_link_pos_w
+  container_pos = container.data.root_link_pos_w
+  dxy = block_pos[:, :2] - container_pos[:, :2]
+  in_xy = torch.linalg.norm(dxy, dim=-1) < xy_tol
+  rel_z = block_pos[:, 2] - container_pos[:, 2]
+  in_z = (rel_z > 0.0) & (rel_z < z_max_above_floor)
+  q = container.data.root_link_quat_w
+  upright = (1.0 - 2.0 * (q[:, 1] ** 2 + q[:, 2] ** 2)) > min_z_axis_alignment
+  gripper_pos = robot.data.joint_pos[:, gripper_asset_cfg.joint_ids].squeeze(-1)
+  gripper_open = gripper_pos > gripper_open_threshold
+  deposited = in_xy & in_z & upright & gripper_open
+
+  joint_vel = robot.data.joint_vel[:, asset_cfg.joint_ids]
+  return deposited.float() * torch.sum(joint_vel ** 2, dim=-1)
+
+
 def success_bonus(
   env: "ManagerBasedRlEnv",
   xy_tol: float = 0.020,

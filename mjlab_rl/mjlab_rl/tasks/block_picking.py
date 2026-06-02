@@ -8,6 +8,8 @@ lift-to-target-pose task — no ``LiftingCommand`` involved).
 
 from __future__ import annotations
 
+import math
+
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp import actions as mdp_actions  # noqa: F401  (kept for compat)
 from mjlab.envs.mdp import events as mdp_events
@@ -61,8 +63,10 @@ from mjlab_rl.envs.actions import RateLimitedJointPositionActionCfg
 # The whole region sits within the SO-101's ~0.35 m reach from base
 # (-0.4, 0.25, 0.825), with the arm pointing in world -y.
 BLOCK_XY_RANGE = {
-  "x": (-0.10, 0.10),  # default x = -0.40 → [-0.50, -0.30]
+  "x": (-0.10, 0.10),    # default x = -0.40 → [-0.50, -0.30]
   "y": (-0.075, 0.075),  # default y = 0.075 → [0.00, 0.15]
+  "yaw": (-math.pi, math.pi),  # full random yaw — block is 4.5×2×2 cm
+                                # so the policy must learn any orientation
 }
 CONTAINER_XY_RANGE = {
   "x": (-0.075, 0.075),  # default x = -0.375 → [-0.45, -0.30]
@@ -265,6 +269,26 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       weight=10.0,
       params={
         "cutoff": 0.5,
+        "gripper_open_threshold": 0.3,
+        "gripper_asset_cfg": SceneEntityCfg(
+          "robot", joint_names=("gripper",)
+        ),
+        "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
+        "block_name": "block",
+        "container_name": "container",
+      },
+    ),
+    # Damps the "dancing at home" jitter after a successful placement.
+    # Sum of squared joint velocities, gated on the same deposit + gripper
+    # open condition. Pre-deposit this is zero, so reach/lift/transport
+    # speed is unconstrained. weight=-0.01 keeps the absolute penalty
+    # small (~0.06/step for a typical 1 rad/s oscillation across 6 joints)
+    # so it shapes behavior without dominating the post-success reward
+    # budget.
+    "post_success_joint_vel": RewardTermCfg(
+      func=task_mdp.post_success_joint_vel_l2,
+      weight=-0.01,
+      params={
         "gripper_open_threshold": 0.3,
         "gripper_asset_cfg": SceneEntityCfg(
           "robot", joint_names=("gripper",)
