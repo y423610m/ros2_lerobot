@@ -346,6 +346,12 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     "nan": TerminationTermCfg(func=mdp_term.nan_detection),
   }
 
+  # Override the model's auto-computed centroid so the viser orbit camera
+  # looks at the workspace instead of the bounding-box centroid of all
+  # geoms (which lands far off-axis with the walls/ceiling/posts present).
+  def _set_camera_lookat(spec: "mujoco.MjSpec") -> None:
+    spec.stat.center = (-0.394, 0.024, 0.853)
+
   gripper_table_contact_cfg = ContactSensorCfg(
     name="gripper_table_contact",
     primary=ContactMatch(mode="subtree", pattern="gripper", entity="robot"),
@@ -368,6 +374,7 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         "container": get_container_cfg(),
       },
       sensors=(gripper_table_contact_cfg,),
+      spec_fn=_set_camera_lookat,
     ),
     observations=observations,
     actions=actions,
@@ -375,12 +382,17 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     rewards=rewards,
     terminations=terminations,
     viewer=ViewerConfig(
-      origin_type=ViewerConfig.OriginType.ASSET_BODY,
-      entity_name="robot",
-      body_name="base",
-      distance=1.2,
-      elevation=-20.0,
-      azimuth=135.0,
+      # Baked from a viser pose dump:
+      #   pos=(-0.040, +0.523, +1.368)
+      #   lookat=(-0.394, +0.024, +0.853)
+      # offset = pos − lookat = (+0.354, +0.499, +0.515), |offset|=0.800.
+      # elevation = arcsin(0.515/0.800)=40.1°; azimuth=atan2(−0.499,−0.354)=234.7°
+      # (viser sign convention: positive elevation = camera above lookat).
+      origin_type=ViewerConfig.OriginType.WORLD,
+      lookat=(-0.394, 0.024, 0.853),
+      distance=0.80,
+      elevation=40.1,
+      azimuth=234.7,
     ),
     sim=SimulationCfg(
       nconmax=80,

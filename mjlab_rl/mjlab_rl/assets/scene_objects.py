@@ -44,6 +44,16 @@ CONTAINER_DROP_SITE_Z: float = 0.10
 
 def _make_block_spec() -> mujoco.MjSpec:
   spec = mujoco.MjSpec()
+  # Matte "sponge" material: no specular highlights, no mirror reflection.
+  # Color stays pink under any lighting (no white wash-out when multiple
+  # randomized lights happen to align with the camera's reflection vector).
+  spec.add_material(
+    name="block_mat",
+    rgba=(1.00, 0.40, 0.70, 1.0),
+    specular=0.0,
+    shininess=0.0,
+    reflectance=0.0,
+  )
   body = spec.worldbody.add_body(name="block")
   body.add_freejoint(name="block_freejoint")
   body.add_geom(
@@ -51,7 +61,7 @@ def _make_block_spec() -> mujoco.MjSpec:
     type=mujoco.mjtGeom.mjGEOM_BOX,
     size=BLOCK_HALF_SIZE,
     mass=BLOCK_MASS,
-    rgba=(1.00, 0.40, 0.70, 1.0),  # pink
+    material="block_mat",
     friction=(1.5, 0.5, 0.5),
   )
   body.add_site(name="block_site", pos=(0, 0, 0), size=(0.003,))
@@ -150,25 +160,120 @@ TABLE_HALF_SIZE: tuple[float, float, float] = (0.6, 0.275, 0.025)
 def _make_table_spec() -> mujoco.MjSpec:
   """Static, fixed-base, non-articulated table — gets replicated per env."""
   spec = mujoco.MjSpec()
+  # Matte black material for the table. Without an explicit material the
+  # default specular (0.5) makes the near-black surface pick up bright
+  # highlights from the warm-tinted lights and look gray in renders.
+  spec.add_material(
+    name="table_mat",
+    rgba=(0.05, 0.05, 0.05, 1.0),  # near-black, fully opaque
+    specular=0.0,
+    shininess=0.0,
+    reflectance=0.0,
+  )
   body = spec.worldbody.add_body(name="table")
   body.add_geom(
     name="table_top",
     type=mujoco.mjtGeom.mjGEOM_BOX,
     size=TABLE_HALF_SIZE,
     pos=(0.0, 0.0, TABLE_TOP_Z - TABLE_HALF_SIZE[2]),
-    rgba=(0.1, 0.1, 0.1, 0.9),
+    material="table_mat",
   )
   # White backdrop wall along the -y edge of the table. Gives the cameras a
   # clean uniform background behind the workspace (helps sim-to-real
   # contrast for vision policies). Slightly outside the table footprint so
   # block/container can sit flush at the edge if randomization pushes them.
+  # Span from the floor (body z=0) to the previous top (body z=1.375).
+  # Half-height = 1.375 / 2 = 0.6875; centre at z = 0.6875.
+  # Walls go from the floor up to 10 cm above the ceiling, so the ceiling
+  # visually slots between the wall tops.
+  _ceiling_z = TABLE_TOP_Z + 0.70
+  _wall_top_z = _ceiling_z + 0.10
+  _wall_half_z = _wall_top_z / 2
+  # x-extent shared by the front wall and ceiling: stretch from the far
+  # side wall (x = -1.6) on the left to the existing right edge (x = +1.2)
+  # so both pieces touch the far wall.
+  _west_x = -(TABLE_HALF_SIZE[0] + 1.0)
+  _east_x = +2 * TABLE_HALF_SIZE[0]
+  _wide_center_x = (_west_x + _east_x) / 2  # = -0.2
+  _wide_half_x = (_east_x - _west_x) / 2     # = 1.4
   body.add_geom(
-    name="backdrop_wall",
+    name="backdrop_wall_front",
     type=mujoco.mjtGeom.mjGEOM_BOX,
-    size=(TABLE_HALF_SIZE[0], 0.01, 0.25),  # 1.2 m wide × 2 cm thick × 60 cm tall
-    pos=(0.0, -(TABLE_HALF_SIZE[1] + 0.01), TABLE_TOP_Z + 0.30),
+    # 2.8 m wide (from far side wall to existing right edge) × 2 cm thick ×
+    # 1.625 m tall.
+    size=(_wide_half_x, 0.01, _wall_half_z),
+    pos=(_wide_center_x, -(TABLE_HALF_SIZE[1] + 0.01 + 0.10), _wall_half_z),
     rgba=(1.0, 1.0, 1.0, 1.0),
   )
+  # Second white wall on the +x side of the table (the "far" side from the
+  # workspace, which lives at x ≈ -0.4). Rotated 90° relative to
+  # backdrop_wall_front — long axis along y, thin along x. Sits at the +x
+  # table edge. Visual only so the SO-101 can't crash into it.
+  body.add_geom(
+    name="backdrop_wall_side",
+    type=mujoco.mjtGeom.mjGEOM_BOX,
+    # 2 cm thick × 1.2 m long (= table x extent) × 1.625 m tall
+    size=(0.01, TABLE_HALF_SIZE[0], _wall_half_z),
+    pos=(+(TABLE_HALF_SIZE[0] + 0.01), 0.0, _wall_half_z),
+    rgba=(1.0, 1.0, 1.0, 1.0),
+    contype=0,
+    conaffinity=0,
+  )
+  # Mirror of backdrop_wall_side, but on the -x side and 1 m away from
+  # the table edge (the workspace lives at x ≈ -0.4, so this wall is past
+  # it). Visual only.
+  body.add_geom(
+    name="backdrop_wall_side_far",
+    type=mujoco.mjtGeom.mjGEOM_BOX,
+    size=(0.01, TABLE_HALF_SIZE[0], _wall_half_z),
+    pos=(-(TABLE_HALF_SIZE[0] + 1.0), 0.0, _wall_half_z),
+    rgba=(1.0, 1.0, 1.0, 1.0),
+    contype=0,
+    conaffinity=0,
+  )
+  # Visible floor slab covering the scene footprint. Sits just above the
+  # mjlab terrain plane (z=0) so it shows in cameras + viewer. Visual only
+  # (the terrain underneath handles collisions).
+  body.add_geom(
+    name="floor",
+    type=mujoco.mjtGeom.mjGEOM_BOX,
+    size=(2.0, 2.0, 0.005),     # 4 m × 4 m × 1 cm
+    pos=(0.0, 0.0, 0.005),
+    rgba=(0.5, 0.5, 0.5, 1.0),  # neutral gray
+    contype=0,
+    conaffinity=0,
+  )
+  # Black ceiling 70 cm above the tabletop. Visual only. Spans the gap
+  # between the two backdrop walls in y and extends in x to match.
+  # (_ceiling_z is defined earlier so the walls can reach above it.)
+  body.add_geom(
+    name="ceiling",
+    type=mujoco.mjtGeom.mjGEOM_BOX,
+    # 2.8 m wide (matches front wall) × ~85 cm front-to-back × 1 cm thick
+    size=(_wide_half_x, TABLE_HALF_SIZE[1] + 0.15, 0.005),
+    pos=(_wide_center_x, 0.0, _ceiling_z),
+    rgba=(0.0, 0.0, 0.0, 1.0),
+    contype=0,
+    conaffinity=0,
+  )
+  # Two thin black cylinders forming an X in the gap between the front
+  # wall and the table edge. Each runs from the floor to the ceiling
+  # diagonally; the two cross at the centre. 1 cm diameter, visual only.
+  _cross_y = -(TABLE_HALF_SIZE[1] + 0.02)         # midway in front-wall gap
+  _cross_half_xspan = _ceiling_z / 2              # 45° → x-span = z-span
+  for name, (x0, x1) in (
+    ("cross_cylinder_l2r", (-_cross_half_xspan, +_cross_half_xspan)),
+    ("cross_cylinder_r2l", (+_cross_half_xspan, -_cross_half_xspan)),
+  ):
+    body.add_geom(
+      name=name,
+      type=mujoco.mjtGeom.mjGEOM_CYLINDER,
+      size=(0.005, 0.0),   # radius 0.5 cm; half-length supplied via fromto
+      fromto=(x0-0.3, _cross_y, 0.3, x1-0.3, _cross_y, _ceiling_z),
+      rgba=(0.0, 0.0, 0.0, 1.0),
+      contype=0,
+      conaffinity=0,
+    )
   # White 10×10 cm mat directly under the SO-101 base. Visual only — gives
   # the camera a consistent landmark to the real robot's calibration pad.
   # Robot base is at world (-0.40, 0.25, 0.825); mat centre matches.
@@ -187,14 +292,27 @@ def _make_table_spec() -> mujoco.MjSpec:
   # toggling each on/off per episode gives a wide range of brightness
   # (1 light = dim, 4 lights = bright) and direction (front/back/side
   # shadows). See `mjlab_rl.envs.mdp.randomize_light_active`.
-  light_z = TABLE_TOP_Z + 0.80
+  light_z = _ceiling_z - 0.10  # 10 cm below the ceiling so they always reach the workspace
   for name, lpos, ldir in (
     ("table_light_overhead",  (-0.40,  0.00, light_z), (0.0,  0.0, -1.0)),
     ("table_light_front",     (-0.40, +0.40, light_z), (0.0, -0.4, -1.0)),
     ("table_light_back",      (-0.40, -0.40, light_z), (0.0, +0.4, -1.0)),
   ):
-    body.add_light(name=name, pos=lpos, dir=ldir,
-                   type=mujoco.mjtLightType.mjLIGHT_DIRECTIONAL)
+    body.add_light(
+      name=name, pos=lpos, dir=ldir,
+      type=mujoco.mjtLightType.mjLIGHT_DIRECTIONAL,
+      # Warm yellow tungsten-bulb tint. Diffuse boosted ~1.5× the default
+      # so the scene is bright even when only one or two lights are on.
+      diffuse=(1.5, 1.25, 0.75),
+      # Specular re-enabled (with the same warm tint) so the walls show
+      # proper highlights. The block stays matte because its material
+      # has specular=0 baked in — material spec multiplies light spec,
+      # so the block sees zero regardless of light spec.
+      specular=(0.7, 0.60, 0.35),
+      # Warm baseline ambient so shadowed faces don't fall to black
+      # when only one light fires.
+      ambient=(0.25, 0.20, 0.10),
+    )
   return spec
 
 
