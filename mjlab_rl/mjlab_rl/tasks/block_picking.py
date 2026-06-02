@@ -153,7 +153,10 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       func=mdp_events.reset_root_state_uniform,
       mode="reset",
       params={
-        "pose_range": {},
+        # ±1 cm mounting jitter so the policy isn't married to the
+        # MJCF's exact (-0.40, 0.25) base location — mirrors the
+        # ~few-mm slop you get bolting the real SO-101 down.
+        "pose_range": {"x": (-0.01, 0.01), "y": (-0.01, 0.01)},
         "velocity_range": {},
         "asset_cfg": SceneEntityCfg("robot"),
       },
