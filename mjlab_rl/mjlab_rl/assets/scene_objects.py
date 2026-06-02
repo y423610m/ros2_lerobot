@@ -9,8 +9,7 @@ import mujoco
 from mjlab.entity import EntityCfg
 
 # Block dimensions (half-extents) and color.
-# 4.5 × 2 × 2 cm block.
-BLOCK_HALF_SIZE: tuple[float, float, float] = (0.0225, 0.01, 0.01)
+BLOCK_HALF_SIZE: float = 0.015
 BLOCK_MASS: float = 0.05
 
 # Container visual mesh (rendered only — collision below uses primitive
@@ -49,9 +48,9 @@ def _make_block_spec() -> mujoco.MjSpec:
   body.add_geom(
     name="block_geom",
     type=mujoco.mjtGeom.mjGEOM_BOX,
-    size=BLOCK_HALF_SIZE,
+    size=(BLOCK_HALF_SIZE,) * 3,
     mass=BLOCK_MASS,
-    rgba=(1.00, 0.40, 0.70, 1.0),  # pink
+    rgba=(0.90, 0.30, 0.10, 1.0),
     friction=(1.5, 0.5, 0.5),
   )
   body.add_site(name="block_site", pos=(0, 0, 0), size=(0.003,))
@@ -215,7 +214,7 @@ def get_table_cfg() -> EntityCfg:
 def get_block_cfg() -> EntityCfg:
   return EntityCfg(
     init_state=EntityCfg.InitialStateCfg(
-      pos=(-0.40, 0.075, TABLE_TOP_Z + BLOCK_HALF_SIZE[2] + 0.001),
+      pos=(-0.40, 0.075, TABLE_TOP_Z + BLOCK_HALF_SIZE + 0.001),
     ),
     spec_fn=_make_block_spec,
   )

@@ -249,7 +249,7 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       func=task_mdp.success_bonus,
       weight=15.0,
       params={
-        "xy_tol": 0.030,         # 3cm tolerance for the 4.5×2×2 cm block
+        "xy_tol": 0.020,         # interior half-width 3.5cm minus block half-size 1.5cm
         "z_max_above_floor": 0.055,  # rim is at 5cm above container body origin
         "block_name": "block",
         "container_name": "container",
