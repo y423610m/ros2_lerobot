@@ -46,7 +46,7 @@ CONFIG: dict = {
 
     # SAC
     "learning_rate":     3e-4,
-    "buffer_size":       1_000_000,
+    "buffer_size":       300_000,  # reduced from 1M to ease OOM pressure on long runs
     "learning_starts":   10_000,
     "batch_size":        2048,
     "tau":               0.005,
@@ -146,7 +146,7 @@ def _make_env(rank: int, seed: int, render_mode: str | None = None):
 # ---------------------------------------------------------------------------
 
 
-def train(render: bool = False) -> SAC:
+def train(render: bool = False, resume: str | None = None) -> SAC:
     taskid = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     CONFIG["checkpoint_dir"] += f"{taskid}/"
     Path(CONFIG["log_dir"]).mkdir(parents=True, exist_ok=True)
@@ -154,13 +154,23 @@ def train(render: bool = False) -> SAC:
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Device: {device}  |  Envs: {CONFIG['n_envs']}  |  Steps: {CONFIG['total_timesteps']:,}")
+    if resume:
+        print(f"Resuming from {resume}")
 
     render_mode = "human" if render else None
     vec_env = SubprocVecEnv([
         _make_env(rank=i, seed=42, render_mode=render_mode)
         for i in range(CONFIG["n_envs"])
     ])
-    vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True, clip_obs=10.0)
+    if resume:
+        vec_norm_path = Path(resume.replace("sac_", "sac_vecnormalize_").replace(".zip", ".pkl"))
+        if vec_norm_path.exists():
+            vec_env = VecNormalize.load(str(vec_norm_path), vec_env)
+            print(f"Loaded VecNormalize stats from {vec_norm_path}")
+        else:
+            raise FileNotFoundError(f"VecNormalize stats not found: {vec_norm_path}")
+    else:
+        vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True, clip_obs=10.0)
 
     eval_env = DummyVecEnv([lambda: Monitor(BlockPickingEnv(
         max_episode_steps=CONFIG["max_episode_steps"],
@@ -172,27 +182,40 @@ def train(render: bool = False) -> SAC:
     eval_env.training = False
     eval_env.norm_reward = False
 
-    model = SAC(
-        policy="MlpPolicy",
-        env=vec_env,
-        learning_rate=CONFIG["learning_rate"],
-        buffer_size=CONFIG["buffer_size"],
-        learning_starts=CONFIG["learning_starts"],
-        batch_size=CONFIG["batch_size"],
-        tau=CONFIG["tau"],
-        gamma=CONFIG["gamma"],
-        train_freq=CONFIG["train_freq"],
-        gradient_steps=CONFIG["gradient_steps"],
-        ent_coef=CONFIG["ent_coef"],
-        target_entropy=CONFIG["target_entropy"],
-        policy_kwargs=dict(
-            net_arch=CONFIG["net_arch"],
-            activation_fn=torch.nn.ReLU,
-        ),
-        tensorboard_log=CONFIG["log_dir"],
-        verbose=0,
-        device=device,
-    )
+    if resume:
+        # custom_objects forces the loaded SAC to use the current CONFIG buffer_size
+        # instead of whatever was saved with the checkpoint — important when the
+        # original run had a too-large buffer that triggered OOM kills.
+        model = SAC.load(
+            resume,
+            env=vec_env,
+            device=device,
+            tensorboard_log=CONFIG["log_dir"],
+            custom_objects={"buffer_size": CONFIG["buffer_size"]},
+        )
+        print(f"Loaded SAC policy from {resume}; num_timesteps={model.num_timesteps} buffer_size={model.buffer_size}")
+    else:
+        model = SAC(
+            policy="MlpPolicy",
+            env=vec_env,
+            learning_rate=CONFIG["learning_rate"],
+            buffer_size=CONFIG["buffer_size"],
+            learning_starts=CONFIG["learning_starts"],
+            batch_size=CONFIG["batch_size"],
+            tau=CONFIG["tau"],
+            gamma=CONFIG["gamma"],
+            train_freq=CONFIG["train_freq"],
+            gradient_steps=CONFIG["gradient_steps"],
+            ent_coef=CONFIG["ent_coef"],
+            target_entropy=CONFIG["target_entropy"],
+            policy_kwargs=dict(
+                net_arch=CONFIG["net_arch"],
+                activation_fn=torch.nn.ReLU,
+            ),
+            tensorboard_log=CONFIG["log_dir"],
+            verbose=0,
+            device=device,
+        )
 
     param_count = sum(p.numel() for p in model.policy.parameters())
     print(f"Policy parameters: {param_count:,}")
@@ -218,11 +241,17 @@ def train(render: bool = False) -> SAC:
     ]
 
     t0 = time.time()
+    if resume:
+        remaining = max(0, CONFIG["total_timesteps"] - model.num_timesteps)
+        print(f"Continuing for {remaining:,} more steps (already at {model.num_timesteps:,}/{CONFIG['total_timesteps']:,})")
+    else:
+        remaining = CONFIG["total_timesteps"]
     model.learn(
-        total_timesteps=CONFIG["total_timesteps"],
+        total_timesteps=remaining,
         callback=callbacks,
         progress_bar=True,
         tb_log_name=taskid,
+        reset_num_timesteps=not resume,
     )
     elapsed = time.time() - t0
     print(f"Training complete in {elapsed / 3600:.2f}h")
@@ -351,6 +380,8 @@ def main() -> None:
     parser.add_argument("--checkpoint",  type=str, default="checkpoints/best_model")
     parser.add_argument("--n-eval-eps",  type=int, default=3)
     parser.add_argument("--timesteps",   type=int, default=None)
+    parser.add_argument("--resume",      type=str, default=None,
+                        help="Path to sac_*_steps.zip to resume training from")
     args = parser.parse_args()
 
     if args.timesteps:
@@ -361,7 +392,7 @@ def main() -> None:
     if args.check:
         check(args.checkpoint, n_episodes=args.n_eval_eps, render=args.render)
     else:
-        train(render=args.render)
+        train(render=args.render, resume=args.resume)
 
 
 if __name__ == "__main__":

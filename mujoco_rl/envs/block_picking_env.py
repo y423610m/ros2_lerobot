@@ -532,27 +532,33 @@ class BlockPickingEnv(MujocoEnv):
                 r_transport = (0.3 * (-d_block_target_xy) + np.exp(-20 * d_block_target_xy)) * REWARD_WEIGHTS["transport"]
                 r_descend   = np.exp(-20 * block_height) * REWARD_WEIGHTS["descend"]
                 # Gripper-opening gradient is gated on being low above the container
-                # so the policy prefers DESCEND-first-then-open, not opening from height
-                # (which lets the block bounce out of the container).
-                if is_object_above_container and block_height < CONTAINER_RIM_HEIGHT + 0.03:
+                # AND well-centered (within half the interior half-width) so the
+                # policy waits until the block is over the center before releasing
+                # rather than dropping it near the rim/wall.
+                if (is_object_above_container
+                        and block_height < CONTAINER_RIM_HEIGHT + 0.03
+                        and d_block_target_xy < CONTAINER_INTERIOR_HALF_WIDTH * 0.5):
                     r_open = (1.0 - normalized_gripper_pos) * 0.5 * REWARD_WEIGHTS["open"]
                     r_hold_penalty = float(is_grasping) * REWARD_WEIGHTS["hold_penalty"]
             elif phase == Phase.RELEASE:
-                # Binary release reward conditional on the block actually being placed
-                # well — prevents the policy from collecting r_release by opening
-                # anywhere over the table.
+                # Binary release reward, gated on the block being inside the
+                # interior half-width (was: half-width + 2cm). Stricter accuracy
+                # required to claim the release bonus.
                 r_release = float(
                     not is_finger_touching and not is_gripper_touching
                     and d_ee_block > 0.03
-                    and d_block_target_xy < CONTAINER_INTERIOR_HALF_WIDTH + 0.02
+                    and d_block_target_xy < CONTAINER_INTERIOR_HALF_WIDTH
                 ) * REWARD_WEIGHTS["release"]
                 r_open = (1.0 - normalized_gripper_pos) * 0.5 * REWARD_WEIGHTS["open"]
                 r_hold_penalty = float(is_grasping) * REWARD_WEIGHTS["hold_penalty"]
-                # Continuous shaping pulls the block toward the container interior
-                # (xy) and rim height, so opening over the container is preferred.
-                placement_shape = np.exp(-30 * d_block_target_xy) + np.exp(-20 * abs(block_height - CONTAINER_RIM_HEIGHT * 0.5))
+                # Sharper XY centering: exp(-60*d) drops from 1.0 at center to
+                # 0.165 at the rim (was 0.41 with exp(-30*d)) — much steeper
+                # gradient toward the container center, discouraging wall-edge
+                # releases.
+                placement_xy = np.exp(-60 * d_block_target_xy)
+                placement_z  = np.exp(-20 * abs(block_height - CONTAINER_RIM_HEIGHT * 0.5))
                 r_placement_success = (
-                    float(is_object_in_container) * 0.25 + placement_shape * 0.15
+                    float(is_object_in_container) * 0.25 + (placement_xy + placement_z) * 0.20
                 ) * REWARD_WEIGHTS["placement_success"]
                 # Earliest HOME-pose pre-shaping; gentle (20%) so it doesn't dominate.
                 r_home = np.exp(-3 * joint_dist_to_home) * 0.2 * REWARD_WEIGHTS["home"]
@@ -560,7 +566,7 @@ class BlockPickingEnv(MujocoEnv):
                 r_release = float(
                     not is_finger_touching and not is_gripper_touching
                     and d_ee_block > 0.03
-                    and d_block_target_xy < CONTAINER_INTERIOR_HALF_WIDTH + 0.02
+                    and d_block_target_xy < CONTAINER_INTERIOR_HALF_WIDTH
                 ) * REWARD_WEIGHTS["release"]
                 r_open = (1.0 - normalized_gripper_pos) * 0.5 * REWARD_WEIGHTS["open"]
                 r_hold_penalty = float(is_grasping) * REWARD_WEIGHTS["hold_penalty"]
@@ -573,11 +579,12 @@ class BlockPickingEnv(MujocoEnv):
                     min(ee_above_rim, LIFT_MAX_THRESHOLD) * 5.0
                     + min(d_ee_block, 0.15) * 5.0
                 ) * REWARD_WEIGHTS["escape"]
-                # Continuous placement shaping persists in ESCAPE so the policy doesn't
-                # get rewarded for retreating if the block isn't actually placed.
-                placement_shape = np.exp(-30 * d_block_target_xy) + np.exp(-20 * abs(block_height - CONTAINER_RIM_HEIGHT * 0.5))
+                # Sharper placement shaping (same as RELEASE) — keeps the policy
+                # accountable for accurate placement throughout ESCAPE too.
+                placement_xy = np.exp(-60 * d_block_target_xy)
+                placement_z  = np.exp(-20 * abs(block_height - CONTAINER_RIM_HEIGHT * 0.5))
                 r_placement_success = (
-                    float(is_object_in_container) * 0.50 + placement_shape * 0.15
+                    float(is_object_in_container) * 0.50 + (placement_xy + placement_z) * 0.20
                 ) * REWARD_WEIGHTS["placement_success"]
                 # Stronger HOME-pose pre-shaping (60% of HOME weight); previous run
                 # only got r_home up to 2.5 at 30% weight, never close enough to the
