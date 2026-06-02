@@ -206,7 +206,7 @@ NENV=2048 ITER=20000 pixi run train-mjlab-vision
 
 # Or bare script.
 uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb \
-    --env.scene.num-envs 1024 --agent.max-iterations 10000 \
+    --env.scene.num-envs 4096 --agent.max-iterations 10000 \
     --agent.logger tensorboard
 ```
 
