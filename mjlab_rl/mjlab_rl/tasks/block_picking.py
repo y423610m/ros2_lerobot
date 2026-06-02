@@ -251,6 +251,8 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       params={
         "xy_tol": 0.030,         # 3cm tolerance for the 4.5×2×2 cm block
         "z_max_above_floor": 0.055,  # rim is at 5cm above container body origin
+        "gripper_open_threshold": 0.3,  # gripper joint pos > 0.3 = released
+        "asset_cfg": SceneEntityCfg("robot", joint_names=("gripper",)),
         "block_name": "block",
         "container_name": "container",
       },
@@ -263,6 +265,10 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       weight=10.0,
       params={
         "cutoff": 0.5,
+        "gripper_open_threshold": 0.3,
+        "gripper_asset_cfg": SceneEntityCfg(
+          "robot", joint_names=("gripper",)
+        ),
         "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
         "block_name": "block",
         "container_name": "container",

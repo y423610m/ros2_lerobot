@@ -206,6 +206,10 @@ def post_success_home_pose_reward(
   xy_tol: float = 0.020,
   z_max_above_floor: float = 0.055,
   min_z_axis_alignment: float = 0.9,
+  gripper_open_threshold: float = 0.3,
+  gripper_asset_cfg: SceneEntityCfg = SceneEntityCfg(
+    "robot", joint_names=("gripper",)
+  ),
   asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", joint_names=(".*",)),
   block_name: str = "block",
   container_name: str = "container",
@@ -244,7 +248,10 @@ def post_success_home_pose_reward(
   in_z = (rel_z > 0.0) & (rel_z < z_max_above_floor)
   q = container.data.root_link_quat_w
   upright = (1.0 - 2.0 * (q[:, 1] ** 2 + q[:, 2] ** 2)) > min_z_axis_alignment
-  deposited = in_xy & in_z & upright
+
+  gripper_pos = robot.data.joint_pos[:, gripper_asset_cfg.joint_ids].squeeze(-1)
+  gripper_open = gripper_pos > gripper_open_threshold
+  deposited = in_xy & in_z & upright & gripper_open
 
   joint_pos = robot.data.joint_pos[:, asset_cfg.joint_ids]
   joint_home = robot.data.default_joint_pos[:, asset_cfg.joint_ids]
@@ -259,14 +266,23 @@ def success_bonus(
   xy_tol: float = 0.020,
   z_max_above_floor: float = 0.055,
   min_z_axis_alignment: float = 0.9,
+  gripper_open_threshold: float = 0.3,
+  asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", joint_names=("gripper",)),
   block_name: str = "block",
   container_name: str = "container",
 ) -> torch.Tensor:
-  """``1`` when the block has settled inside the container's interior
-  *and* the container is still upright.
+  """``1`` when the block has settled inside the container's interior,
+  the container is still upright, *and* the gripper is open (= the
+  block has actually been let go of).
+
+  The gripper-open gate prevents the "carry-the-container" failure mode:
+  if you only check (block in cup) + (upright), the policy can drag the
+  container around with the block clenched inside and still farm success
+  reward every step. Requiring an open gripper forces a true release.
 
   Defaults assume the bundled container mesh (interior half-width 3.5 cm,
-  rim at 5 cm above the body origin) and a 1.5 cm-half-edge block.
+  rim at 5 cm above the body origin) and the SO-101 gripper joint (range
+  ``[-0.17, 1.74]``, home ``0.0``; ``>0.3`` is solidly open).
 
   ``xy_tol`` is what's left of the interior after the block takes up its
   share (3.5 − 1.5 = 2.0 cm); ``z_max_above_floor`` is the rim height
@@ -274,6 +290,7 @@ def success_bonus(
   allowed tilt from vertical (0.9 ≈ 26°). Yaw rotations don't affect
   success — only tipping does.
   """
+  robot: Entity = env.scene[asset_cfg.name]
   block: Entity = env.scene[block_name]
   container: Entity = env.scene[container_name]
 
@@ -294,7 +311,10 @@ def success_bonus(
   z_axis_dot_world_z = 1.0 - 2.0 * (q[:, 1] ** 2 + q[:, 2] ** 2)
   upright = z_axis_dot_world_z > min_z_axis_alignment
 
-  return (in_xy & in_z & upright).float()
+  gripper_pos = robot.data.joint_pos[:, asset_cfg.joint_ids].squeeze(-1)
+  gripper_open = gripper_pos > gripper_open_threshold
+
+  return (in_xy & in_z & upright & gripper_open).float()
 
 
 # ---------------------------------------------------------------------------
