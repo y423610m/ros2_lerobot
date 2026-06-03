@@ -269,14 +269,26 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     # Stops the policy from wandering during the post-success steps.
     "home_pose_after_success": RewardTermCfg(
       func=task_mdp.post_success_home_pose_reward,
-      weight=10.0,
+      weight=30.0,
       params={
-        "cutoff": 0.5,
+        # Sum of |q - q_home| over the 5 arm joints (gripper excluded —
+        # the deposit gate already requires it open). cutoff=2.5 gives
+        # ~0.5 rad per-joint tolerance, matching the old mean-form intent.
+        "cutoff": 2.5,
         "gripper_open_threshold": 0.3,
         "gripper_asset_cfg": SceneEntityCfg(
           "robot", joint_names=("gripper",)
         ),
-        "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
+        "asset_cfg": SceneEntityCfg(
+          "robot",
+          joint_names=(
+            "shoulder_pan",
+            "shoulder_lift",
+            "elbow_flex",
+            "wrist_flex",
+            "wrist_roll",
+          ),
+        ),
         "block_name": "block",
         "container_name": "container",
       },
@@ -284,13 +296,10 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     # Damps the "dancing at home" jitter after a successful placement.
     # Sum of squared joint velocities, gated on the same deposit + gripper
     # open condition. Pre-deposit this is zero, so reach/lift/transport
-    # speed is unconstrained. weight=-0.01 keeps the absolute penalty
-    # small (~0.06/step for a typical 1 rad/s oscillation across 6 joints)
-    # so it shapes behavior without dominating the post-success reward
-    # budget.
+    # speed is unconstrained.
     "post_success_joint_vel": RewardTermCfg(
       func=task_mdp.post_success_joint_vel_l2,
-      weight=-0.01,
+      weight=-0.1,
       params={
         "gripper_open_threshold": 0.3,
         "gripper_asset_cfg": SceneEntityCfg(

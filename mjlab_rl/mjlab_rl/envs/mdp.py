@@ -210,7 +210,16 @@ def post_success_home_pose_reward(
   gripper_asset_cfg: SceneEntityCfg = SceneEntityCfg(
     "robot", joint_names=("gripper",)
   ),
-  asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", joint_names=(".*",)),
+  asset_cfg: SceneEntityCfg = SceneEntityCfg(
+    "robot",
+    joint_names=(
+      "shoulder_pan",
+      "shoulder_lift",
+      "elbow_flex",
+      "wrist_flex",
+      "wrist_roll",
+    ),
+  ),
   block_name: str = "block",
   container_name: str = "container",
 ) -> torch.Tensor:
@@ -219,21 +228,23 @@ def post_success_home_pose_reward(
   Returns ``deposited * proximity(q, q_home)``. ``deposited`` is the same
   boolean condition as :func:`success_bonus` (block in cup, upright);
   ``q_home`` is the entity's ``default_joint_pos``. The proximity term is
-  a **linear** ramp on the mean per-joint absolute deviation:
+  a **linear, unclamped** ramp on the **sum** of per-arm-joint absolute
+  deviations (gripper is excluded — it's enforced separately by the
+  deposit gate):
 
-      proximity = clamp(1 − mean(|q − q_home|) / cutoff, 0, 1)
+      proximity = 1 − sum(|q − q_home|) / cutoff
 
-  Linear (vs the earlier Gaussian) gives a constant gradient toward home
-  regardless of how close the policy already is, so the policy doesn't
-  plateau at a "good enough" near-home pose. ``cutoff`` is the
-  per-joint-rad mean at which the proximity hits zero; smaller cutoff =
-  steeper gradient.
+  No clamping — closer to home is **always** strictly better. ``cutoff``
+  is the deviation at which the term flips sign: at home → +1, at
+  ``sum == cutoff`` → 0, beyond → negative (proportional penalty).
+  Sum (vs mean) means a single joint sitting far from home tanks the
+  proximity even when the others are tucked in.
 
-  Sample values with ``cutoff=0.5``:
-    * every joint at home              ⇒ 1.0
-    * every joint 0.1 rad off (~6°)    ⇒ 0.80
-    * every joint 0.3 rad off (~17°)   ⇒ 0.40
-    * every joint 0.5 rad off (~29°)   ⇒ 0.00
+  Sample values with 5 arm joints and ``cutoff=2.5``:
+    * every joint at home              ⇒ +1.0
+    * every joint 0.10 rad off (~6°)   ⇒ +0.80  (sum = 0.50)
+    * every joint 0.50 rad off (~29°)  ⇒  0.00  (sum = 2.50)
+    * every joint 1.00 rad off (~57°)  ⇒ −1.00  (sum = 5.00)
   """
   robot: Entity = env.scene[asset_cfg.name]
   block: Entity = env.scene[block_name]
@@ -255,8 +266,8 @@ def post_success_home_pose_reward(
 
   joint_pos = robot.data.joint_pos[:, asset_cfg.joint_ids]
   joint_home = robot.data.default_joint_pos[:, asset_cfg.joint_ids]
-  mean_abs_dev = torch.mean(torch.abs(joint_pos - joint_home), dim=-1)
-  home_proximity = (1.0 - mean_abs_dev / cutoff).clamp(0.0, 1.0)
+  sum_abs_dev = torch.sum(torch.abs(joint_pos - joint_home), dim=-1)
+  home_proximity = 1.0 - sum_abs_dev / cutoff
 
   return deposited.float() * home_proximity
 
