@@ -269,7 +269,7 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     # Stops the policy from wandering during the post-success steps.
     "home_pose_after_success": RewardTermCfg(
       func=task_mdp.post_success_home_pose_reward,
-      weight=30.0,
+      weight=5.0,
       params={
         # Sum of |q - q_home| over the 5 arm joints (gripper excluded —
         # the deposit gate already requires it open). cutoff=2.5 gives
