@@ -41,6 +41,7 @@ from mjlab.viewer import ViewerConfig
 
 from mjlab_rl.assets import (
   SO101_ACTION_SCALE,
+  SO101_MAX_RELATIVE_TARGET,
   TABLE_TOP_Z,
   get_block_cfg,
   get_container_cfg,
@@ -122,18 +123,9 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       actuator_names=(".*",),
       scale=SO101_ACTION_SCALE,
       use_default_offset=True,
-      # Per-step (env-step = 20 ms at decimation=4, timestep=0.005) max delta
-      # from the present joint position. Mirrors lerobot's SOFollower
-      # send_action safety clamp. 0.1 rad/step ≈ 5 rad/s, in line with what
-      # the real STS-3215 servos can comfortably do.
-      max_relative_target={
-        "shoulder_pan": 0.1,
-        "shoulder_lift": 0.1,
-        "elbow_flex": 0.1,
-        "wrist_flex": 0.1,
-        "wrist_roll": 0.1,
-        "gripper": 0.3,  # gripper snaps faster
-      },
+      # 0.1 rad/step ≈ 5 rad/s, in line with what the real STS-3215 servos
+      # can comfortably do; gripper snaps faster.
+      max_relative_target=SO101_MAX_RELATIVE_TARGET,
     ),
   }
 
