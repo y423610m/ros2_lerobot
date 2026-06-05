@@ -37,6 +37,20 @@ play-mjlab-trained = "cd $PIXI_PROJECT_ROOT/mjlab_rl && bash -c 'uv run python s
 # Same but with a zero-action agent — no checkpoint needed, useful for scene inspection.
 play-mjlab-zero = "cd $PIXI_PROJECT_ROOT/mjlab_rl && uv run python scripts/play.py Mjlab-SO101-Block-Picking --viewer viser --agent zero --num-envs 1 --no-terminations True"
 
+# ----- Vision variant (Mjlab-SO101-Block-Picking-Rgb) -----
+# Train from scratch with the wrist + top-down camera setup.
+train-mjlab-vision = "cd $PIXI_PROJECT_ROOT/mjlab_rl && bash -c 'uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb --env.scene.num-envs ${NENV:-4096} --agent.max-iterations ${ITER:-10000} --agent.logger tensorboard'"
+# Replay the vision policy in viser.
+play-mjlab-vision-trained = "cd $PIXI_PROJECT_ROOT/mjlab_rl && bash -c 'uv run python scripts/play.py Mjlab-SO101-Block-Picking-Rgb --viewer viser --checkpoint-file ${CKPT:?set CKPT=path/to/model.pt}'"
+# Inspect the static vision scene (no checkpoint) — viser sidebar shows the camera feeds.
+play-mjlab-vision-zero = "cd $PIXI_PROJECT_ROOT/mjlab_rl && uv run python scripts/play.py Mjlab-SO101-Block-Picking-Rgb --viewer viser --agent zero --num-envs 1 --no-terminations True"
+# Same as play-mjlab-vision-zero but with a "Print camera pose" button in
+# the viser GUI; click after dragging to a good view and the camera
+# position / wxyz / lookat are dumped to the terminal you launched from.
+play-mjlab-vision-zero-print-camera = "cd $PIXI_PROJECT_ROOT/mjlab_rl && uv run python scripts/play_print_camera.py Mjlab-SO101-Block-Picking-Rgb --viewer viser --agent zero --num-envs 1 --no-terminations True"
+# Headless snapshot of both cameras → wrist_cam.png + top_cam.png in CWD.
+render-mjlab-cameras = "cd $PIXI_PROJECT_ROOT/mjlab_rl && uv run python scripts/render_cameras.py"
+
 [activation]
 scripts = ["install/setup.sh"]
 

@@ -206,7 +206,20 @@ def post_success_home_pose_reward(
   xy_tol: float = 0.020,
   z_max_above_floor: float = 0.055,
   min_z_axis_alignment: float = 0.9,
-  asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", joint_names=(".*",)),
+  gripper_open_threshold: float = 0.3,
+  gripper_asset_cfg: SceneEntityCfg = SceneEntityCfg(
+    "robot", joint_names=("gripper",)
+  ),
+  asset_cfg: SceneEntityCfg = SceneEntityCfg(
+    "robot",
+    joint_names=(
+      "shoulder_pan",
+      "shoulder_lift",
+      "elbow_flex",
+      "wrist_flex",
+      "wrist_roll",
+    ),
+  ),
   block_name: str = "block",
   container_name: str = "container",
 ) -> torch.Tensor:
@@ -215,21 +228,23 @@ def post_success_home_pose_reward(
   Returns ``deposited * proximity(q, q_home)``. ``deposited`` is the same
   boolean condition as :func:`success_bonus` (block in cup, upright);
   ``q_home`` is the entity's ``default_joint_pos``. The proximity term is
-  a **linear** ramp on the mean per-joint absolute deviation:
+  a **linear, unclamped** ramp on the **sum** of per-arm-joint absolute
+  deviations (gripper is excluded — it's enforced separately by the
+  deposit gate):
 
-      proximity = clamp(1 − mean(|q − q_home|) / cutoff, 0, 1)
+      proximity = 1 − sum(|q − q_home|) / cutoff
 
-  Linear (vs the earlier Gaussian) gives a constant gradient toward home
-  regardless of how close the policy already is, so the policy doesn't
-  plateau at a "good enough" near-home pose. ``cutoff`` is the
-  per-joint-rad mean at which the proximity hits zero; smaller cutoff =
-  steeper gradient.
+  No clamping — closer to home is **always** strictly better. ``cutoff``
+  is the deviation at which the term flips sign: at home → +1, at
+  ``sum == cutoff`` → 0, beyond → negative (proportional penalty).
+  Sum (vs mean) means a single joint sitting far from home tanks the
+  proximity even when the others are tucked in.
 
-  Sample values with ``cutoff=0.5``:
-    * every joint at home              ⇒ 1.0
-    * every joint 0.1 rad off (~6°)    ⇒ 0.80
-    * every joint 0.3 rad off (~17°)   ⇒ 0.40
-    * every joint 0.5 rad off (~29°)   ⇒ 0.00
+  Sample values with 5 arm joints and ``cutoff=2.5``:
+    * every joint at home              ⇒ +1.0
+    * every joint 0.10 rad off (~6°)   ⇒ +0.80  (sum = 0.50)
+    * every joint 0.50 rad off (~29°)  ⇒  0.00  (sum = 2.50)
+    * every joint 1.00 rad off (~57°)  ⇒ −1.00  (sum = 5.00)
   """
   robot: Entity = env.scene[asset_cfg.name]
   block: Entity = env.scene[block_name]
@@ -244,14 +259,57 @@ def post_success_home_pose_reward(
   in_z = (rel_z > 0.0) & (rel_z < z_max_above_floor)
   q = container.data.root_link_quat_w
   upright = (1.0 - 2.0 * (q[:, 1] ** 2 + q[:, 2] ** 2)) > min_z_axis_alignment
-  deposited = in_xy & in_z & upright
+
+  gripper_pos = robot.data.joint_pos[:, gripper_asset_cfg.joint_ids].squeeze(-1)
+  gripper_open = gripper_pos > gripper_open_threshold
+  deposited = in_xy & in_z & upright & gripper_open
 
   joint_pos = robot.data.joint_pos[:, asset_cfg.joint_ids]
   joint_home = robot.data.default_joint_pos[:, asset_cfg.joint_ids]
-  mean_abs_dev = torch.mean(torch.abs(joint_pos - joint_home), dim=-1)
-  home_proximity = (1.0 - mean_abs_dev / cutoff).clamp(0.0, 1.0)
+  sum_abs_dev = torch.sum(torch.abs(joint_pos - joint_home), dim=-1)
+  home_proximity = 1.0 - sum_abs_dev / cutoff
 
   return deposited.float() * home_proximity
+
+
+def post_success_joint_vel_l2(
+  env: "ManagerBasedRlEnv",
+  xy_tol: float = 0.020,
+  z_max_above_floor: float = 0.055,
+  min_z_axis_alignment: float = 0.9,
+  gripper_open_threshold: float = 0.3,
+  gripper_asset_cfg: SceneEntityCfg = SceneEntityCfg(
+    "robot", joint_names=("gripper",)
+  ),
+  asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", joint_names=(".*",)),
+  block_name: str = "block",
+  container_name: str = "container",
+) -> torch.Tensor:
+  """Sum of squared joint velocities, gated on the same deposit/release
+  condition as :func:`success_bonus`.
+
+  Pair with a small negative weight to damp the "dancing at home" jitter
+  the policy exhibits after a successful placement. Pre-deposit this term
+  is zero, so reach/lift/transport speed is not constrained.
+  """
+  robot: Entity = env.scene[asset_cfg.name]
+  block: Entity = env.scene[block_name]
+  container: Entity = env.scene[container_name]
+
+  block_pos = block.data.root_link_pos_w
+  container_pos = container.data.root_link_pos_w
+  dxy = block_pos[:, :2] - container_pos[:, :2]
+  in_xy = torch.linalg.norm(dxy, dim=-1) < xy_tol
+  rel_z = block_pos[:, 2] - container_pos[:, 2]
+  in_z = (rel_z > 0.0) & (rel_z < z_max_above_floor)
+  q = container.data.root_link_quat_w
+  upright = (1.0 - 2.0 * (q[:, 1] ** 2 + q[:, 2] ** 2)) > min_z_axis_alignment
+  gripper_pos = robot.data.joint_pos[:, gripper_asset_cfg.joint_ids].squeeze(-1)
+  gripper_open = gripper_pos > gripper_open_threshold
+  deposited = in_xy & in_z & upright & gripper_open
+
+  joint_vel = robot.data.joint_vel[:, asset_cfg.joint_ids]
+  return deposited.float() * torch.sum(joint_vel ** 2, dim=-1)
 
 
 def success_bonus(
@@ -259,14 +317,23 @@ def success_bonus(
   xy_tol: float = 0.020,
   z_max_above_floor: float = 0.055,
   min_z_axis_alignment: float = 0.9,
+  gripper_open_threshold: float = 0.3,
+  asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", joint_names=("gripper",)),
   block_name: str = "block",
   container_name: str = "container",
 ) -> torch.Tensor:
-  """``1`` when the block has settled inside the container's interior
-  *and* the container is still upright.
+  """``1`` when the block has settled inside the container's interior,
+  the container is still upright, *and* the gripper is open (= the
+  block has actually been let go of).
+
+  The gripper-open gate prevents the "carry-the-container" failure mode:
+  if you only check (block in cup) + (upright), the policy can drag the
+  container around with the block clenched inside and still farm success
+  reward every step. Requiring an open gripper forces a true release.
 
   Defaults assume the bundled container mesh (interior half-width 3.5 cm,
-  rim at 5 cm above the body origin) and a 1.5 cm-half-edge block.
+  rim at 5 cm above the body origin) and the SO-101 gripper joint (range
+  ``[-0.17, 1.74]``, home ``0.0``; ``>0.3`` is solidly open).
 
   ``xy_tol`` is what's left of the interior after the block takes up its
   share (3.5 − 1.5 = 2.0 cm); ``z_max_above_floor`` is the rim height
@@ -274,6 +341,7 @@ def success_bonus(
   allowed tilt from vertical (0.9 ≈ 26°). Yaw rotations don't affect
   success — only tipping does.
   """
+  robot: Entity = env.scene[asset_cfg.name]
   block: Entity = env.scene[block_name]
   container: Entity = env.scene[container_name]
 
@@ -294,7 +362,10 @@ def success_bonus(
   z_axis_dot_world_z = 1.0 - 2.0 * (q[:, 1] ** 2 + q[:, 2] ** 2)
   upright = z_axis_dot_world_z > min_z_axis_alignment
 
-  return (in_xy & in_z & upright).float()
+  gripper_pos = robot.data.joint_pos[:, asset_cfg.joint_ids].squeeze(-1)
+  gripper_open = gripper_pos > gripper_open_threshold
+
+  return (in_xy & in_z & upright & gripper_open).float()
 
 
 # ---------------------------------------------------------------------------
@@ -425,6 +496,39 @@ def sensor_contact_penalty(
 # ---------------------------------------------------------------------------
 # Terminations.
 # ---------------------------------------------------------------------------
+
+
+def randomize_light_active(
+  env: "ManagerBasedRlEnv",
+  env_ids: torch.Tensor | None,
+  p_on: float = 0.6,
+  ensure_one_on: bool = True,
+) -> None:
+  """Reset-mode event: toggle each scene light to ``active=True`` with
+  probability ``p_on``.
+
+  Combined with the four table-attached directional lights this gives a
+  wide range of brightness — 1 light = dim, 4 lights = bright, plus
+  side-lit / top-lit variations depending on which combination is on.
+
+  Caveat: mujoco_warp **shares one set of lights across all envs**
+  (the underlying ``light_active`` warp buffer has shape ``(1, nlight)``
+  with a stride-0 batch dim, even though mjlab exposes it as
+  ``(num_envs, nlight)``). Each reset call randomizes the global
+  lighting, so brightness varies *between* episodes but is identical
+  across the batch at any given moment. Still useful as domain
+  randomization — over a long training run the policy sees thousands of
+  lighting conditions.
+  """
+  light_active = env.sim.model.light_active
+  num_lights = light_active.shape[1]
+
+  # Single random draw — writes are broadcast across the batch anyway.
+  new_active = torch.rand(num_lights, device=env.device) < p_on
+  if ensure_one_on and not new_active.any():
+    new_active[torch.randint(0, num_lights, (1,)).item()] = True
+
+  light_active[0] = new_active
 
 
 def block_dropped(

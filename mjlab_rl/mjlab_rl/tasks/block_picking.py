@@ -8,6 +8,8 @@ lift-to-target-pose task — no ``LiftingCommand`` involved).
 
 from __future__ import annotations
 
+import math
+
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp import actions as mdp_actions  # noqa: F401  (kept for compat)
 from mjlab.envs.mdp import events as mdp_events
@@ -61,8 +63,10 @@ from mjlab_rl.envs.actions import RateLimitedJointPositionActionCfg
 # The whole region sits within the SO-101's ~0.35 m reach from base
 # (-0.4, 0.25, 0.825), with the arm pointing in world -y.
 BLOCK_XY_RANGE = {
-  "x": (-0.10, 0.10),  # default x = -0.40 → [-0.50, -0.30]
+  "x": (-0.10, 0.10),    # default x = -0.40 → [-0.50, -0.30]
   "y": (-0.075, 0.075),  # default y = 0.075 → [0.00, 0.15]
+  "yaw": (-math.pi, math.pi),  # full random yaw — block is 4.5×2×2 cm
+                                # so the policy must learn any orientation
 }
 CONTAINER_XY_RANGE = {
   "x": (-0.075, 0.075),  # default x = -0.375 → [-0.45, -0.30]
@@ -149,7 +153,10 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       func=mdp_events.reset_root_state_uniform,
       mode="reset",
       params={
-        "pose_range": {},
+        # ±1 cm mounting jitter so the policy isn't married to the
+        # MJCF's exact (-0.40, 0.25) base location — mirrors the
+        # ~few-mm slop you get bolting the real SO-101 down.
+        "pose_range": {"x": (-0.01, 0.01), "y": (-0.01, 0.01)},
         "velocity_range": {},
         "asset_cfg": SceneEntityCfg("robot"),
       },
@@ -187,6 +194,14 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       func=task_mdp.snapshot_container_xy,
       mode="reset",
       params={"container_name": "container"},
+    ),
+    # Randomize which scene lights are active per env — gives bright/dim/
+    # angled-shadow variation each episode. 4 lights × Bernoulli(0.6) →
+    # ~2.4 on average. ensure_one_on prevents pitch-black scenes.
+    "randomize_lights": EventTermCfg(
+      func=task_mdp.randomize_light_active,
+      mode="reset",
+      params={"p_on": 0.6, "ensure_one_on": True},
     ),
   }
 
@@ -241,8 +256,10 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       func=task_mdp.success_bonus,
       weight=15.0,
       params={
-        "xy_tol": 0.020,         # interior half-width 3.5cm minus block half-size 1.5cm
+        "xy_tol": 0.030,         # 3cm tolerance for the 4.5×2×2 cm block
         "z_max_above_floor": 0.055,  # rim is at 5cm above container body origin
+        "gripper_open_threshold": 0.3,  # gripper joint pos > 0.3 = released
+        "asset_cfg": SceneEntityCfg("robot", joint_names=("gripper",)),
         "block_name": "block",
         "container_name": "container",
       },
@@ -252,9 +269,42 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     # Stops the policy from wandering during the post-success steps.
     "home_pose_after_success": RewardTermCfg(
       func=task_mdp.post_success_home_pose_reward,
-      weight=10.0,
+      weight=5.0,
       params={
-        "cutoff": 0.5,
+        # Sum of |q - q_home| over the 5 arm joints (gripper excluded —
+        # the deposit gate already requires it open). cutoff=2.5 gives
+        # ~0.5 rad per-joint tolerance, matching the old mean-form intent.
+        "cutoff": 2.5,
+        "gripper_open_threshold": 0.3,
+        "gripper_asset_cfg": SceneEntityCfg(
+          "robot", joint_names=("gripper",)
+        ),
+        "asset_cfg": SceneEntityCfg(
+          "robot",
+          joint_names=(
+            "shoulder_pan",
+            "shoulder_lift",
+            "elbow_flex",
+            "wrist_flex",
+            "wrist_roll",
+          ),
+        ),
+        "block_name": "block",
+        "container_name": "container",
+      },
+    ),
+    # Damps the "dancing at home" jitter after a successful placement.
+    # Sum of squared joint velocities, gated on the same deposit + gripper
+    # open condition. Pre-deposit this is zero, so reach/lift/transport
+    # speed is unconstrained.
+    "post_success_joint_vel": RewardTermCfg(
+      func=task_mdp.post_success_joint_vel_l2,
+      weight=-0.1,
+      params={
+        "gripper_open_threshold": 0.3,
+        "gripper_asset_cfg": SceneEntityCfg(
+          "robot", joint_names=("gripper",)
+        ),
         "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
         "block_name": "block",
         "container_name": "container",
@@ -308,6 +358,12 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     "nan": TerminationTermCfg(func=mdp_term.nan_detection),
   }
 
+  # Override the model's auto-computed centroid so the viser orbit camera
+  # looks at the workspace instead of the bounding-box centroid of all
+  # geoms (which lands far off-axis with the walls/ceiling/posts present).
+  def _set_camera_lookat(spec: "mujoco.MjSpec") -> None:
+    spec.stat.center = (-0.394, 0.024, 0.853)
+
   gripper_table_contact_cfg = ContactSensorCfg(
     name="gripper_table_contact",
     primary=ContactMatch(mode="subtree", pattern="gripper", entity="robot"),
@@ -330,6 +386,7 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         "container": get_container_cfg(),
       },
       sensors=(gripper_table_contact_cfg,),
+      spec_fn=_set_camera_lookat,
     ),
     observations=observations,
     actions=actions,
@@ -337,12 +394,17 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     rewards=rewards,
     terminations=terminations,
     viewer=ViewerConfig(
-      origin_type=ViewerConfig.OriginType.ASSET_BODY,
-      entity_name="robot",
-      body_name="base",
-      distance=1.2,
-      elevation=-20.0,
-      azimuth=135.0,
+      # Baked from a viser pose dump:
+      #   pos=(-0.040, +0.523, +1.368)
+      #   lookat=(-0.394, +0.024, +0.853)
+      # offset = pos − lookat = (+0.354, +0.499, +0.515), |offset|=0.800.
+      # elevation = arcsin(0.515/0.800)=40.1°; azimuth=atan2(−0.499,−0.354)=234.7°
+      # (viser sign convention: positive elevation = camera above lookat).
+      origin_type=ViewerConfig.OriginType.WORLD,
+      lookat=(-0.394, 0.024, 0.853),
+      distance=0.80,
+      elevation=40.1,
+      azimuth=234.7,
     ),
     sim=SimulationCfg(
       nconmax=80,
