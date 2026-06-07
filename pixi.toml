@@ -10,6 +10,11 @@ build = {cmd = "colcon build", inputs = ["src"]}
 run-so101-leader = "ros2 run lerobot_robots_teleoperators lerobot_teleoperator_node --config $(ros2 pkg prefix lerobot_robots_teleoperators)/share/lerobot_robots_teleoperators/config/teleop_so101.yaml --ros-args -r __ns:=/leader"
 run-so101-follower = "ros2 run lerobot_robots_robots lerobot_robot_node --config $(ros2 pkg prefix lerobot_robots_robots)/share/lerobot_robots_robots/config/robot_so101.yaml --ros-args -r __ns:=/follower"
 run-leader-follower = "ros2 run lerobot_robots_teleoperators leader_follower"
+# Launch rviz2 from an SSH/tty shell by borrowing the GNOME Wayland session's
+# Xwayland display + auth cookie. The .mutter-Xwaylandauth.* suffix changes on
+# each desktop login, so resolve it at runtime. Window appears on the physical
+# screen. Override the display with DISP=:2 if :1 isn't yours.
+rviz-wayland = "bash -c 'export DISPLAY=${DISP:-:1}; export XAUTHORITY=$(ls -t /run/user/$(id -u)/.mutter-Xwaylandauth.* 2>/dev/null | head -1); ros2 run rviz2 rviz2'"
 view-so101-follower = "ros2 launch lerobot_robots_bringup view_follower.launch.py"
 view-so101-leader = "ros2 launch lerobot_robots_description view_leader.launch.py"
 run-gazebo-so101-follower = "ros2 launch lerobot_robots_bringup so101_gazebo.launch.py"
