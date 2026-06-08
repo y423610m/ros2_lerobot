@@ -80,6 +80,10 @@ def make_block_picking_vision_env_cfg(play: bool = False):
     # debug tool.
     enabled_geom_groups=(0, 2),
     use_textures=True,
+    # mujoco-warp ray-traces shadows, so they are hard-edged / directional by
+    # construction (the OpenGL shadowsize/shadowscale knobs don't apply here).
+    # Adds GPU cost per camera per step and changes the policy's input
+    # distribution — retrain after flipping this.
     use_shadows=False,
   )
   wrist_cam = CameraSensorCfg(

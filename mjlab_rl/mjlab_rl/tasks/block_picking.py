@@ -350,11 +350,22 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     "nan": TerminationTermCfg(func=mdp_term.nan_detection),
   }
 
-  # Override the model's auto-computed centroid so the viser orbit camera
-  # looks at the workspace instead of the bounding-box centroid of all
-  # geoms (which lands far off-axis with the walls/ceiling/posts present).
+  # Scene-wide visual tweaks applied to the merged spec right before compile
+  # (entity specs' own <visual> blocks are discarded by MjSpec.attach, so this
+  # callback is the only place global visual settings take effect).
   def _set_camera_lookat(spec: "mujoco.MjSpec") -> None:
+    # Override the model's auto-computed centroid so the viser orbit camera
+    # looks at the workspace instead of the bounding-box centroid of all
+    # geoms (which lands far off-axis with the walls/ceiling/posts present).
     spec.stat.center = (-0.394, 0.024, 0.853)
+    # Sharpen the OpenGL-viewer shadows. The base scene already uses an
+    # 8192-texel shadow map, but the default shadowscale=0.6 spreads it over
+    # the whole walled room, so workspace shadows look blurry. Shrinking the
+    # scale concentrates the same texture on the ~0.5 m workspace → crisp,
+    # directional shadow edges. (Viewer-only; mujoco-warp camera rendering
+    # ray-traces shadows and ignores these knobs.)
+    spec.visual.quality.shadowsize = 8192
+    spec.visual.map.shadowscale = 0.2
 
   gripper_table_contact_cfg = ContactSensorCfg(
     name="gripper_table_contact",
