@@ -27,10 +27,8 @@ def launch_setup(context, *args, **kwargs):
             'robot_so101.yaml',
         )
 
-    zero_action = LaunchConfiguration('zero_action').perform(context).lower() in ('1', 'true', 'yes')
-
     checkpoint = LaunchConfiguration('checkpoint').perform(context)
-    if not checkpoint and not zero_action:
+    if not checkpoint:
         raise RuntimeError(
             "checkpoint:= argument is required (path to a TorchScript .jit "
             "exported from mjlab via scripts/export_to_jit.py)"
@@ -92,7 +90,6 @@ def launch_setup(context, *args, **kwargs):
             'checkpoint_path': checkpoint,
             'control_hz': control_hz,
             'device': device,
-            'zero_action': zero_action,
             'joint_states_topic': '/follower/joint_states',
             'joint_command_topic': '/follower/joint_command',
             'wrist_cam_topic': '/wrist_cam/image_raw',
@@ -109,7 +106,7 @@ def generate_launch_description():
         DeclareLaunchArgument('checkpoint', default_value='',
                               description='Path to TorchScript .jit policy'),
         DeclareLaunchArgument('wrist_device', default_value='0'),
-        DeclareLaunchArgument('top_device', default_value='1'),
+        DeclareLaunchArgument('top_device', default_value='2'),
         DeclareLaunchArgument('cam_width', default_value='640'),
         DeclareLaunchArgument('cam_height', default_value='480'),
         DeclareLaunchArgument('cam_fps', default_value='30.0'),
@@ -117,7 +114,5 @@ def generate_launch_description():
                               description='Policy inference rate (Hz)'),
         DeclareLaunchArgument('device', default_value='auto',
                               description='Torch device: auto | cpu | cuda'),
-        DeclareLaunchArgument('zero_action', default_value='false',
-                              description='Diagnostic: ignore policy, command a zero action (= home pose)'),
         OpaqueFunction(function=launch_setup),
     ])

@@ -30,28 +30,33 @@ an obviously wrong pose. What we established:
   at +300s) and still succeeds in sim. So large `policy_out` on the real robot is
   not itself evidence of a problem — the policy is sensitive to action *direction*,
   which comes from observations.
-- **Remaining suspect: the sim-to-real observation gap.** Most likely the camera
-  obs (device mapping `wrist_device=2`/`top_device=0`, framing/FOV, color, the
-  90° top-cam rotation) and/or the home/calibration offset between the real arm's
-  zero and sim `HOME_JOINT_POS`.
+- **The `.jit` export is faithful.** It reproduces the checkpoint exactly
+  (max|Δ|=0) on sim observations; obs layout confirmed `actor:(1,12)`,
+  `camera:(1,6,64,64)`. So the artifact and obs layout are not the problem.
+- **ROOT CAUSE: the wrist/top cameras were swapped (now FIXED).** Dumping the
+  64×64 frames the node feeds vs the sim renders showed the `top` feed pointed at
+  the ceiling and the `wrist` feed showed the bench. At the home pose the
+  wrist-mounted cam points up, the overhead cam looks down — so the correct
+  mapping is `wrist_device=0`, `top_device=2` (was 2/0). Fixed in the
+  `run-so101-policy` task and the launch default. With OOD images the (good)
+  policy steered confidently wrong; the swap explains the bad pose.
+
+Still to confirm: the wrist-cam *viewpoint* matches sim `hand_eye` once the arm
+is in a task pose (only checked at home, where it points at the ceiling).
 
 Action term detail worth knowing: `RateLimitedJointPositionAction`
 (`mjlab_rl/mjlab_rl/envs/actions.py`) sends `target = home + scale*raw −
 encoder_bias`. `encoder_bias` is **0** for the block-picking task (only the
 velocity/tracking tasks enable the DR event that sets it), so zero action == home.
 
-Diagnostic aids currently in the tree (TEMP):
-- `policy_node.py` `zero_action` param: commands zeros (= home) while still
-  running the policy on live cameras and logging its output (1 Hz: present /
-  target / raw_action / scale*raw / policy_out / policy_tgt). `pixi run
-  run-so101-policy` currently passes `zero_action:=true` — remove it to command
-  the real policy.
-- `mjlab_rl/scripts/_check_actions.py`: headless rollout that reports action
-  magnitude + reward/return for a checkpoint in sim.
+Fixes kept in the tree:
+- Camera swap: `wrist_device=0`, `top_device=2`.
+- `arm_config` launch default now resolves from `lerobot_robots_robots` (was
+  wrongly `lerobot_robots_bringup`).
+- `policy_node.py` homes the arm (rate-limited) to `HOME_JOINT_POS` on startup
+  before policy control, mirroring the sim reset (`home_on_start`, default true).
 
-Also note: the launch's default `arm_config` was fixed to resolve from
-`lerobot_robots_robots` (was wrongly pointing at `lerobot_robots_bringup`).
-
-Next steps not yet done: (a) verify the exported `.jit` reproduces the
-checkpoint on one sim obs (rule out a broken export); (b) dump the exact 64×64
-images the node feeds the policy and compare to sim `wrist_cam.png`/`top_cam.png`.
+Temporary diagnostics removed from `policy_node.py` after use (`zero_action`,
+`dump_images`, joint/image logging). Standalone diagnostic scripts
+`mjlab_rl/scripts/_check_actions.py` (action magnitude + reward in sim) and
+`_check_jit.py` (.jit-vs-checkpoint equivalence) may still be present — throwaway.
