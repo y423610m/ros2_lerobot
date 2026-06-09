@@ -13,7 +13,10 @@ run-leader-follower = "ros2 run lerobot_robots_teleoperators leader_follower"
 # Run a TorchScript-exported mjlab vision policy on the real SO-101 arm.
 # Override the checkpoint and camera device indices with env vars:
 #   CKPT=path/to/policy.jit WRIST=2 TOP=0 pixi run run-so101-policy
-run-so101-policy = "bash -c 'ros2 launch lerobot_robots_bringup so101_policy.launch.py checkpoint:=${CKPT:-/home/pixy/ros2_lerobot/mjlab_rl/logs/rsl_rl/so101_block_picking_vision/2026-06-03_20-21-22/policy.jit} wrist_device:=${WRIST:-2} top_device:=${TOP:-0}'"
+# TEMP: zero_action:=true mimics the policy outputting all zeros (target = home
+# pose) to debug the command path / unit conversion. Remove zero_action:=true
+# to restore the real policy.
+run-so101-policy = "bash -c 'ros2 launch lerobot_robots_bringup so101_policy.launch.py zero_action:=true checkpoint:=${CKPT:-/home/pixy/ros2_lerobot/mjlab_rl/logs/rsl_rl/so101_block_picking_vision/2026-06-03_20-21-22/policy.jit} wrist_device:=${WRIST:-2} top_device:=${TOP:-0}'"
 # Launch rviz2 from an SSH/tty shell by borrowing the GNOME Wayland session's
 # Xwayland display + auth cookie. The .mutter-Xwaylandauth.* suffix changes on
 # each desktop login, so resolve it at runtime. Window appears on the physical

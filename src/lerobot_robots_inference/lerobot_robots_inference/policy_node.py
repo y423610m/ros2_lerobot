@@ -97,19 +97,39 @@ class PolicyNode(Node):
         self.declare_parameter('joint_command_topic', 'joint_command')
         self.declare_parameter('wrist_cam_topic', '/wrist_cam/image_raw')
         self.declare_parameter('top_cam_topic', '/top_cam/image_raw')
+        # TEMP/diagnostic: when true, replace the policy output with an all-zero
+        # action vector and run it through the normal control equation
+        # (target = home + scale*0, then the present ± MAX_RELATIVE_TARGET
+        # clamp). This is exactly what the policy commands when it outputs
+        # zeros, so it exercises the real action/unit path without the network.
+        # No checkpoint or cameras needed.
+        self.declare_parameter('zero_action', False)
 
-        checkpoint_path = str(self.get_parameter('checkpoint_path').value)
-        if not checkpoint_path:
-            raise RuntimeError('checkpoint_path parameter is required')
+        self._zero_action = bool(self.get_parameter('zero_action').value)
         control_hz = float(self.get_parameter('control_hz').value)
         device_str = str(self.get_parameter('device').value)
         if device_str == 'auto':
             device_str = 'cuda' if torch.cuda.is_available() else 'cpu'
         self._device = torch.device(device_str)
 
-        self.get_logger().info(f'loading policy from {checkpoint_path} on {self._device}')
-        self._policy = torch.jit.load(checkpoint_path, map_location=self._device)
-        self._policy.eval()
+        checkpoint_path = str(self.get_parameter('checkpoint_path').value)
+        if not checkpoint_path:
+            if not self._zero_action:
+                raise RuntimeError('checkpoint_path parameter is required')
+            self.get_logger().warn(
+                'ZERO_ACTION mode with no checkpoint: commanding zeros only '
+                '(no policy output to print)'
+            )
+            self._policy = None
+        else:
+            self.get_logger().info(f'loading policy from {checkpoint_path} on {self._device}')
+            self._policy = torch.jit.load(checkpoint_path, map_location=self._device)
+            self._policy.eval()
+            if self._zero_action:
+                self.get_logger().warn(
+                    'ZERO_ACTION mode: commanding zeros (target = home), but '
+                    'still running the policy to print its output'
+                )
 
         # Cached constants as numpy arrays in the canonical joint order.
         self._home = _by_joint_order(HOME_JOINT_POS)
@@ -171,7 +191,36 @@ class PolicyNode(Node):
 
     # ---- Control loop -----------------------------------------------------
 
+    def _run_policy(self, joint_pos: np.ndarray) -> Optional[np.ndarray]:
+        """Forward the policy on the current obs; returns the (6,) raw action,
+        or None if no policy is loaded / camera frames haven't arrived yet."""
+        if self._policy is None or self._latest_wrist is None or self._latest_top is None:
+            return None
+        joint_pos_rel = joint_pos - self._home  # mirrors mdp_obs.joint_pos_rel
+        state_obs = np.concatenate([joint_pos_rel, self._last_action], axis=0)
+        cam_obs = np.concatenate([self._latest_wrist, self._latest_top], axis=0)
+        state_t = torch.from_numpy(state_obs).to(self._device).unsqueeze(0)        # (1, 12)
+        cam_t = torch.from_numpy(cam_obs).to(self._device).unsqueeze(0)            # (1, 6, 64, 64)
+        with torch.inference_mode():
+            return self._policy(state_t, [cam_t]).squeeze(0).cpu().numpy()         # (6,)
+
     def _on_timer(self) -> None:
+        # TEMP/diagnostic zero-action mode: command an all-zero action (target =
+        # home), but still run the policy (if loaded + cameras ready) so its
+        # output can be logged for comparison — without ever sending it.
+        if self._zero_action:
+            if self._latest_joint_pos is None:
+                return
+            joint_pos = self._latest_joint_pos
+            policy_out = self._run_policy(joint_pos)  # logged only, not commanded
+            raw = np.zeros(len(SO101_JOINT_NAMES), dtype=np.float32)
+            target = self._home + self._scale * raw
+            target = np.clip(target, joint_pos - self._max_rel, joint_pos + self._max_rel)
+            self._publish_target(target)
+            self._log_joints(joint_pos, target, raw, policy_out)
+            self._last_action = raw
+            return
+
         if (
             self._latest_joint_pos is None
             or self._latest_wrist is None
@@ -180,29 +229,55 @@ class PolicyNode(Node):
             return  # warm-up: wait for first observations
 
         joint_pos = self._latest_joint_pos
-        joint_pos_rel = joint_pos - self._home  # mirrors mdp_obs.joint_pos_rel
-
-        state_obs = np.concatenate([joint_pos_rel, self._last_action], axis=0)
-        cam_obs = np.concatenate([self._latest_wrist, self._latest_top], axis=0)
-
-        state_t = torch.from_numpy(state_obs).to(self._device).unsqueeze(0)        # (1, 12)
-        cam_t = torch.from_numpy(cam_obs).to(self._device).unsqueeze(0)            # (1, 6, 64, 64)
-
-        with torch.inference_mode():
-            raw = self._policy(state_t, [cam_t]).squeeze(0).cpu().numpy()           # (6,)
+        raw = self._run_policy(joint_pos)
 
         target = self._home + self._scale * raw
         lo = joint_pos - self._max_rel
         hi = joint_pos + self._max_rel
         target = np.clip(target, lo, hi)
 
+        self._publish_target(target)
+        self._log_joints(joint_pos, target, raw)
+        self._last_action = raw.astype(np.float32)
+
+    def _log_joints(
+        self,
+        present: np.ndarray,
+        target: np.ndarray,
+        raw: np.ndarray,
+        policy_out: Optional[np.ndarray] = None,
+    ) -> None:
+        """Throttled (1 Hz) dump of present joint pos, commanded target, and the
+        raw action — in canonical joint order — for comparing w/ and w/o
+        zero_action. Present/target are radians; deg shown for the motor side.
+        In zero_action mode ``policy_out`` is the (uncommanded) policy action;
+        we also show where it *would* have driven the arm (home + scale*out)."""
+        def fmt(arr: np.ndarray) -> str:
+            return '  '.join(f'{n}={v:+.3f}' for n, v in zip(SO101_JOINT_NAMES, arr))
+
+        lines = [
+            'present[rad] ' + fmt(present),
+            '    present[deg]        ' + fmt(present * 180.0 / np.pi),
+            '    target [rad]        ' + fmt(target),
+            '    target [deg]        ' + fmt(target * 180.0 / np.pi),
+            # raw_action is the unitless normalized policy output; scale*raw is
+            # the resulting joint-angle offset (rad) added on top of home.
+            '    raw_action[unitless] ' + fmt(raw),
+            '    scale*raw  [rad]    ' + fmt(self._scale * raw),
+        ]
+        if policy_out is not None:
+            would_be = self._home + self._scale * policy_out
+            lines.append('    policy_out[unitless] ' + fmt(policy_out))
+            lines.append('    policy scale*out[rad] ' + fmt(self._scale * policy_out))
+            lines.append('    policy_tgt[deg]      ' + fmt(would_be * 180.0 / np.pi))
+        self.get_logger().info('\n'.join(lines), throttle_duration_sec=1.0)
+
+    def _publish_target(self, target: np.ndarray) -> None:
         msg = JointState()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.name = list(SO101_JOINT_NAMES)
         msg.position = target.astype(float).tolist()
         self._cmd_pub.publish(msg)
-
-        self._last_action = raw.astype(np.float32)
 
 
 def main(args=None) -> None:

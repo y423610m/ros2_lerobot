@@ -22,13 +22,15 @@ def launch_setup(context, *args, **kwargs):
     arm_config = LaunchConfiguration('arm_config').perform(context)
     if not arm_config:
         arm_config = os.path.join(
-            get_package_share_directory('lerobot_robots_bringup'),
+            get_package_share_directory('lerobot_robots_robots'),
             'config',
             'robot_so101.yaml',
         )
 
+    zero_action = LaunchConfiguration('zero_action').perform(context).lower() in ('1', 'true', 'yes')
+
     checkpoint = LaunchConfiguration('checkpoint').perform(context)
-    if not checkpoint:
+    if not checkpoint and not zero_action:
         raise RuntimeError(
             "checkpoint:= argument is required (path to a TorchScript .jit "
             "exported from mjlab via scripts/export_to_jit.py)"
@@ -90,6 +92,7 @@ def launch_setup(context, *args, **kwargs):
             'checkpoint_path': checkpoint,
             'control_hz': control_hz,
             'device': device,
+            'zero_action': zero_action,
             'joint_states_topic': '/follower/joint_states',
             'joint_command_topic': '/follower/joint_command',
             'wrist_cam_topic': '/wrist_cam/image_raw',
@@ -114,5 +117,7 @@ def generate_launch_description():
                               description='Policy inference rate (Hz)'),
         DeclareLaunchArgument('device', default_value='auto',
                               description='Torch device: auto | cpu | cuda'),
+        DeclareLaunchArgument('zero_action', default_value='false',
+                              description='Diagnostic: ignore policy, command a zero action (= home pose)'),
         OpaqueFunction(function=launch_setup),
     ])
