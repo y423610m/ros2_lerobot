@@ -19,10 +19,15 @@ Same env as ``Mjlab-SO101-Block-Picking``, but:
 
 from __future__ import annotations
 
+import math
+
+from mjlab.envs.mdp import dr
+from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.observation_manager import (
   ObservationGroupCfg,
   ObservationTermCfg,
 )
+from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.rl import (
   RslRlModelCfg,
   RslRlOnPolicyRunnerCfg,
@@ -108,6 +113,41 @@ def make_block_picking_vision_env_cfg(play: bool = False):
     **shared,
   )
   cfg.scene.sensors = (cfg.scene.sensors or ()) + (wrist_cam, top_cam)
+
+  # --- Camera extrinsics randomization ----------------------------------
+  # Per-episode jitter of each camera's mount pose so the policy is robust to
+  # the real rig not matching the sim extrinsics exactly (a cause of the
+  # residual ee-placement error on hardware). cam_pos adds an offset to the
+  # default position; cam_quat composes an RPY perturbation onto the default
+  # orientation.
+  #   wrist cam: existing MJCF camera, owned by "robot" entity ("hand_eye").
+  #     Rigidly bolted to the wrist, so tight pos jitter (±2 cm) but ±5° orient.
+  #   top cam:   created on the table body, owned by "table" entity ("top_cam").
+  #     Free-standing overhead rig, so looser ±10 cm pos and ±15° orient.
+  # (key, entity, camera, pos_range_m, rpy_range_rad)
+  for key, entity, cam, pos_range, rpy_range in (
+    ("wrist_cam", "robot", "hand_eye", (-0.02, 0.02), (-math.radians(5.0), math.radians(5.0))),
+    ("top_cam", "table", "top_cam", (-0.10, 0.10), (-math.radians(15.0), math.radians(15.0))),
+  ):
+    cfg.events[f"{key}_pos"] = EventTermCfg(
+      func=dr.cam_pos,
+      mode="reset",
+      params={
+        "asset_cfg": SceneEntityCfg(entity, camera_names=(cam,)),
+        "ranges": pos_range,
+        "operation": "add",
+      },
+    )
+    cfg.events[f"{key}_quat"] = EventTermCfg(
+      func=dr.cam_quat,
+      mode="reset",
+      params={
+        "asset_cfg": SceneEntityCfg(entity, camera_names=(cam,)),
+        "roll_range": rpy_range,
+        "pitch_range": rpy_range,
+        "yaw_range": rpy_range,
+      },
+    )
 
   # --- Observations -----------------------------------------------------
   # Strip privileged distance terms from the actor; it must learn them

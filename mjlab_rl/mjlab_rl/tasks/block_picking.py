@@ -12,6 +12,7 @@ import math
 
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp import actions as mdp_actions  # noqa: F401  (kept for compat)
+from mjlab.envs.mdp import dr
 from mjlab.envs.mdp import events as mdp_events
 from mjlab.envs.mdp import observations as mdp_obs
 from mjlab.envs.mdp import rewards as mdp_rewards
@@ -160,6 +161,19 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         "position_range": (-0.02, 0.02),
         "velocity_range": (0.0, 0.0),
         "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
+      },
+    ),
+    # Per-episode joint encoder calibration offset. This bias is *unobservable*
+    # to the policy (the action target is shifted by it via
+    # RateLimitedJointPositionAction), so training forces robustness to the real
+    # arm's calibration error — the residual ~1-3 cm ee misplacement seen on
+    # hardware. ±5° per joint.
+    "encoder_bias": EventTermCfg(
+      func=dr.encoder_bias,
+      mode="reset",
+      params={
+        "asset_cfg": SceneEntityCfg("robot"),
+        "bias_range": (-math.radians(5.0), math.radians(5.0)),
       },
     ),
     "reset_block_pose": EventTermCfg(
