@@ -229,7 +229,7 @@ def make_block_picking_vision_ppo_cfg() -> RslRlOnPolicyRunnerCfg:
       max_grad_norm=1.0,
     ),
     experiment_name="so101_block_picking_vision",
-    save_interval=100,
+    save_interval=1000,
     num_steps_per_env=base.num_steps_per_env,
     max_iterations=10_000,  # vision needs more iters
   )

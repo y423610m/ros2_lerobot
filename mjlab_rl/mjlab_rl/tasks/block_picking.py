@@ -482,7 +482,7 @@ def make_block_picking_ppo_cfg() -> RslRlOnPolicyRunnerCfg:
       max_grad_norm=1.0,
     ),
     experiment_name="so101_block_picking",
-    save_interval=100,
+    save_interval=1000,
     num_steps_per_env=24,
     max_iterations=5_000,
   )
