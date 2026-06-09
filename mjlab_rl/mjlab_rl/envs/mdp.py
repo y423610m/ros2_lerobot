@@ -18,7 +18,9 @@ from typing import TYPE_CHECKING
 import torch
 
 from mjlab.entity import Entity
+from mjlab.managers.event_manager import requires_model_fields
 from mjlab.managers.scene_entity_config import SceneEntityCfg
+from mjlab.utils.lab_api.math import matrix_from_quat
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -529,6 +531,52 @@ def randomize_light_active(
     new_active[torch.randint(0, num_lights, (1,)).item()] = True
 
   light_active[0] = new_active
+
+
+@requires_model_fields("cam_pos")
+def randomize_cam_pos_in_image_plane(
+  env: "ManagerBasedRlEnv",
+  env_ids: torch.Tensor | None,
+  camera_name: str,
+  u_range: tuple[float, float] = (0.0, 0.0),
+  v_range: tuple[float, float] = (0.0, 0.0),
+) -> None:
+  """Reset-mode event: offset a camera within its own image plane (local x/y),
+  leaving the optical axis (local z = depth) fixed.
+
+  ``dr.cam_pos`` perturbs ``cam_pos`` in the *parent-body* frame, which only
+  coincides with the image plane when the optical axis is a parent axis — true
+  for the straight-down top cam, but not the tilted wrist cam. Here we build the
+  camera's local x/y axes from its default orientation and add a sampled 2-D
+  offset along them, so depth never changes regardless of mounting tilt.
+
+  ``u_range`` / ``v_range`` are offsets (m) along the camera's local x and y.
+
+  The default pose comes from ``sim.get_default_field`` (the compile-time value,
+  captured once and cached) — NOT a fresh read of ``mj_model``. The viewer
+  overwrites ``mj_model.cam_pos`` every frame with the randomized per-world pose
+  (``cam_pos`` is in ``VIEWER_MODEL_FIELDS``); reading it back each reset would
+  treat the last randomized pose as the new baseline and accumulate, drifting
+  the camera away over episodes.
+  """
+  cam_id = env.sim.mj_model.camera(camera_name).id
+
+  if env_ids is None:
+    env_ids = torch.arange(env.num_envs, device=env.device)
+  env_ids = env_ids.to(env.device)
+  n = int(env_ids.shape[0])
+
+  default_pos = env.sim.get_default_field("cam_pos")[cam_id].to(env.device, torch.float32)
+  default_quat = env.sim.get_default_field("cam_quat")[cam_id].to(env.device, torch.float32)
+  # Columns of the rotation matrix are the camera's local axes in the parent
+  # frame; [:, 0] = local x, [:, 1] = local y (image plane), [:, 2] = depth.
+  rot = matrix_from_quat(default_quat.unsqueeze(0))[0]
+  x_axis, y_axis = rot[:, 0], rot[:, 1]
+
+  du = torch.empty(n, device=env.device).uniform_(u_range[0], u_range[1])
+  dv = torch.empty(n, device=env.device).uniform_(v_range[0], v_range[1])
+  offset = du.unsqueeze(-1) * x_axis + dv.unsqueeze(-1) * y_axis  # (n, 3)
+  env.sim.model.cam_pos[env_ids, cam_id] = default_pos + offset
 
 
 def block_dropped(

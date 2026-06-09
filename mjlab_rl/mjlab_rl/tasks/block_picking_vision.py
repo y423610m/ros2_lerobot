@@ -38,6 +38,7 @@ from mjlab.tasks.manipulation import mdp as manipulation_mdp
 from mjlab.tasks.manipulation.rl import ManipulationOnPolicyRunner
 from mjlab.tasks.registry import register_mjlab_task
 
+from mjlab_rl.envs import mdp as task_mdp
 from mjlab_rl.tasks.block_picking import (
   make_block_picking_env_cfg,
   make_block_picking_ppo_cfg,
@@ -117,37 +118,55 @@ def make_block_picking_vision_env_cfg(play: bool = False):
   # --- Camera extrinsics randomization ----------------------------------
   # Per-episode jitter of each camera's mount pose so the policy is robust to
   # the real rig not matching the sim extrinsics exactly (a cause of the
-  # residual ee-placement error on hardware). cam_pos adds an offset to the
-  # default position; cam_quat composes an RPY perturbation onto the default
-  # orientation.
-  #   wrist cam: existing MJCF camera, owned by "robot" entity ("hand_eye").
-  #     Rigidly bolted to the wrist, so tight pos jitter (±2 cm) but ±5° orient.
-  #   top cam:   created on the table body, owned by "table" entity ("top_cam").
-  #     Free-standing overhead rig, so looser ±10 cm pos and ±15° orient.
-  # (key, entity, camera, pos_range_m, rpy_range_rad)
-  for key, entity, cam, pos_range, rpy_range in (
-    ("wrist_cam", "robot", "hand_eye", (-0.02, 0.02), (-math.radians(5.0), math.radians(5.0))),
-    ("top_cam", "table", "top_cam", (-0.10, 0.10), (-math.radians(15.0), math.radians(15.0))),
-  ):
-    cfg.events[f"{key}_pos"] = EventTermCfg(
-      func=dr.cam_pos,
-      mode="reset",
-      params={
-        "asset_cfg": SceneEntityCfg(entity, camera_names=(cam,)),
-        "ranges": pos_range,
-        "operation": "add",
-      },
-    )
-    cfg.events[f"{key}_quat"] = EventTermCfg(
-      func=dr.cam_quat,
-      mode="reset",
-      params={
-        "asset_cfg": SceneEntityCfg(entity, camera_names=(cam,)),
-        "roll_range": rpy_range,
-        "pitch_range": rpy_range,
-        "yaw_range": rpy_range,
-      },
-    )
+  # residual ee-placement error on hardware).
+  _WRIST_RPY = (-math.radians(5.0), math.radians(5.0))
+  _TOP_RPY = (-math.radians(15.0), math.radians(15.0))
+
+  # Wrist cam ("robot/hand_eye"), rigidly bolted to the wrist. Position is
+  # jittered ONLY within its image plane (local x/y), NOT along the optical
+  # axis (depth) — its optical axis is tilted, so plain cam_pos can't isolate
+  # that. ±2 cm in-plane, ±5° orientation.
+  cfg.events["wrist_cam_pos"] = EventTermCfg(
+    func=task_mdp.randomize_cam_pos_in_image_plane,
+    mode="reset",
+    params={
+      "camera_name": "robot/hand_eye",
+      "u_range": (-0.02, 0.02),
+      "v_range": (-0.02, 0.02),
+    },
+  )
+  cfg.events["wrist_cam_quat"] = EventTermCfg(
+    func=dr.cam_quat,
+    mode="reset",
+    params={
+      "asset_cfg": SceneEntityCfg("robot", camera_names=("hand_eye",)),
+      "roll_range": _WRIST_RPY,
+      "pitch_range": _WRIST_RPY,
+      "yaw_range": _WRIST_RPY,
+    },
+  )
+
+  # Top cam ("top_cam"), free-standing overhead rig. Full ±10 cm position
+  # offset (all axes) and ±15° orientation — unchanged.
+  cfg.events["top_cam_pos"] = EventTermCfg(
+    func=dr.cam_pos,
+    mode="reset",
+    params={
+      "asset_cfg": SceneEntityCfg("table", camera_names=("top_cam",)),
+      "ranges": (-0.10, 0.10),
+      "operation": "add",
+    },
+  )
+  cfg.events["top_cam_quat"] = EventTermCfg(
+    func=dr.cam_quat,
+    mode="reset",
+    params={
+      "asset_cfg": SceneEntityCfg("table", camera_names=("top_cam",)),
+      "roll_range": _TOP_RPY,
+      "pitch_range": _TOP_RPY,
+      "yaw_range": _TOP_RPY,
+    },
+  )
 
   # --- Observations -----------------------------------------------------
   # Strip privileged distance terms from the actor; it must learn them
