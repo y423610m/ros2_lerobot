@@ -106,15 +106,28 @@ def place_block_reward(
   std: float = 0.10,
   block_name: str = "block",
   container_name: str = "container",
+  lift_height: float = 0.03,
 ) -> torch.Tensor:
-  """Gaussian reward on block→container distance, gated by lift."""
+  """Gaussian reward on block→container distance, **gated by lift**.
+
+  The gaussian is scaled by a lift ramp ``clamp((z - z0) / lift_height, 0, 1)``
+  so the reward is zero while the block is still on the table and only ramps in
+  as it is lifted (full by ``lift_height`` above its start). Without this gate
+  the policy can farm the place reward by *sliding* the block across the table
+  toward the container instead of picking it up.
+  """
   block: Entity = env.scene[block_name]
   container: Entity = env.scene[container_name]
   container_site_pos = container.data.site_pos_w[:, 0]
   d2 = torch.sum(
     (block.data.root_link_pos_w - container_site_pos) ** 2, dim=-1
   )
-  return torch.exp(-d2 / (std**2))
+  gaussian = torch.exp(-d2 / (std**2))
+
+  initial_z = block.data.default_root_state[:, 2]
+  current_z = block.data.root_link_pos_w[:, 2]
+  lift_frac = ((current_z - initial_z) / lift_height).clamp(0.0, 1.0)
+  return gaussian * lift_frac
 
 
 def gripper_open_above_cup_bonus(

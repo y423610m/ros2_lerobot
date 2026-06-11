@@ -219,7 +219,7 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     ),
     "lift": RewardTermCfg(
       func=task_mdp.lift_block_reward,
-      weight=2.0,
+      weight=4.0,
       params={"max_lift": 0.10, "block_name": "block"},
     ),
     "place": RewardTermCfg(
@@ -229,6 +229,9 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         "std": 0.10,
         "block_name": "block",
         "container_name": "container",
+        # Gate place on lift: zero while the block is on the table, full once
+        # it's ~3 cm up. Stops the policy farming place by sliding the block.
+        "lift_height": 0.03,
       },
     ),
     # Behavioral bonus: rewards the act of opening the gripper while the
