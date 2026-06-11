@@ -30,6 +30,7 @@ Export the checkpoint to TorchScript first via mjlab_rl's
 
 from __future__ import annotations
 
+import time
 from typing import Optional
 
 import cv2
@@ -66,21 +67,21 @@ HOME_JOINT_POS: dict[str, float] = {
 }
 
 ACTION_SCALE: dict[str, float] = {
-    'shoulder_pan': 0.5,
-    'shoulder_lift': 0.5,
-    'elbow_flex': 0.5,
-    'wrist_flex': 0.5,
-    'wrist_roll': 0.5,
-    'gripper': 0.8,
+    'shoulder_pan': 0.2,
+    'shoulder_lift': 0.2,
+    'elbow_flex': 0.2,
+    'wrist_flex': 0.2,
+    'wrist_roll': 0.2,
+    'gripper': 0.3,
 }
 
 MAX_RELATIVE_TARGET: dict[str, float] = {
-    'shoulder_pan': 0.1,
-    'shoulder_lift': 0.1,
-    'elbow_flex': 0.1,
-    'wrist_flex': 0.1,
-    'wrist_roll': 0.1,
-    'gripper': 0.3,
+    'shoulder_pan': 0.025,
+    'shoulder_lift': 0.025,
+    'elbow_flex': 0.025,
+    'wrist_flex': 0.025,
+    'wrist_roll': 0.025,
+    'gripper': 0.05,
 }
 
 CAMERA_HW: tuple[int, int] = (64, 64)  # H, W expected by the actor's CNN
@@ -137,6 +138,11 @@ class PolicyNode(Node):
         self._latest_wrist: Optional[np.ndarray] = None
         self._latest_top: Optional[np.ndarray] = None
         self._last_action = np.zeros(len(SO101_JOINT_NAMES), dtype=np.float32)
+
+        # Inference-rate measurement (logged ~1 Hz once the policy is running).
+        self._rate_window_start: Optional[float] = None
+        self._rate_count = 0
+        self._rate_infer_accum = 0.0
 
         self._bridge = CvBridge()
 
@@ -212,7 +218,9 @@ class PolicyNode(Node):
         if self._latest_wrist is None or self._latest_top is None:
             return  # warm-up: wait for the first camera frames
 
+        t0 = time.perf_counter()
         raw = self._run_policy(joint_pos)
+        infer_dt = time.perf_counter() - t0
 
         target = self._home + self._scale * raw
         lo = joint_pos - self._max_rel
@@ -221,6 +229,26 @@ class PolicyNode(Node):
 
         self._publish_target(target)
         self._last_action = raw.astype(np.float32)
+        self._report_rate(infer_dt)
+
+    def _report_rate(self, infer_dt: float) -> None:
+        """Log the achieved inference rate (loop Hz) and mean inference compute
+        time once per ~1 s window."""
+        now = time.perf_counter()
+        if self._rate_window_start is None:
+            self._rate_window_start = now
+        self._rate_count += 1
+        self._rate_infer_accum += infer_dt
+        elapsed = now - self._rate_window_start
+        if elapsed >= 1.0:
+            hz = self._rate_count / elapsed
+            mean_ms = 1e3 * self._rate_infer_accum / self._rate_count
+            self.get_logger().info(
+                f'inference rate: {hz:.1f} Hz  (mean inference {mean_ms:.1f} ms)'
+            )
+            self._rate_window_start = now
+            self._rate_count = 0
+            self._rate_infer_accum = 0.0
 
     def _home_to_start(self, joint_pos: np.ndarray) -> None:
         """Rate-limited move to the home pose before policy control begins, so

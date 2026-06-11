@@ -154,11 +154,18 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         "asset_cfg": SceneEntityCfg("robot"),
       },
     ),
+    # Randomize the arm's starting configuration each episode (offset from the
+    # home pose, clamped to soft joint limits). Was ±0.02 rad (tiny, ~home
+    # only); widened to ±0.3 rad (~17°/joint) so the policy learns to pick from
+    # a spread of configurations rather than a single home-launched trajectory.
+    # On the real arm small drift pushes it into states a home-only start
+    # distribution never covered, where it would "give up" and return home;
+    # training from varied starts keeps those states in-distribution.
     "reset_robot_joints": EventTermCfg(
       func=mdp_events.reset_joints_by_offset,
       mode="reset",
       params={
-        "position_range": (-0.02, 0.02),
+        "position_range": (-0.3, 0.3),
         "velocity_range": (0.0, 0.0),
         "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
       },

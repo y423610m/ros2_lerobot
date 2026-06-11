@@ -168,6 +168,26 @@ def make_block_picking_vision_env_cfg(play: bool = False):
     },
   )
 
+  # Field-of-view (focal length) jitter on both cameras. A real webcam's FOV
+  # rarely matches the sim camera exactly; the mismatch rescales where objects
+  # appear, which the policy reads as an object-position error (the ~2 cm pick
+  # offset). ±3° about the default fovy makes it robust to that. cam_fovy reads
+  # the cached compile-time default, so it does not drift under the viewer.
+  _FOVY_RANGE = (-3.0, 3.0)  # degrees, added to the default vertical FOV
+  for key, entity, cam in (
+    ("wrist_cam", "robot", "hand_eye"),
+    ("top_cam", "table", "top_cam"),
+  ):
+    cfg.events[f"{key}_fovy"] = EventTermCfg(
+      func=dr.cam_fovy,
+      mode="reset",
+      params={
+        "asset_cfg": SceneEntityCfg(entity, camera_names=(cam,)),
+        "ranges": _FOVY_RANGE,
+        "operation": "add",
+      },
+    )
+
   # --- Observations -----------------------------------------------------
   # Strip privileged distance terms from the actor; it must learn them
   # from pixels. Also drop joint_vel: lerobot's SOFollower.get_observation
