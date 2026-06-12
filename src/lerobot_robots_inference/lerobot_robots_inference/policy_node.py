@@ -264,6 +264,7 @@ class PolicyNode(Node):
                 'home timeout; handing off to policy from current pose '
                 f'(max |Δ|={float(np.abs(joint_pos - self._home).max()):.3f} rad)'
             )
+            assert False
             self._homed = True
 
     def _publish_target(self, target: np.ndarray) -> None:
