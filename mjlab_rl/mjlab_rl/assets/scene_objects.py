@@ -45,11 +45,13 @@ CONTAINER_DROP_SITE_Z: float = 0.10
 def _make_block_spec() -> mujoco.MjSpec:
   spec = mujoco.MjSpec()
   # Matte "sponge" material: no specular highlights, no mirror reflection.
-  # Color stays pink under any lighting (no white wash-out when multiple
+  # Color stays stable under any lighting (no white wash-out when multiple
   # randomized lights happen to align with the camera's reflection vector).
+  # Light salmon / skin tone to match the real target (a soft pink-orange,
+  # not the previous vivid magenta-pink).
   spec.add_material(
     name="block_mat",
-    rgba=(1.00, 0.40, 0.70, 1.0),
+    rgba=(1.00, 0.72, 0.62, 1.0),
     specular=0.0,
     shininess=0.0,
     reflectance=0.0,
