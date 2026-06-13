@@ -25,11 +25,17 @@ begins from the configuration the sim resets to; policy control takes over once
 home is reached. Disable with ``home_on_start:=false``.
 
 Export the checkpoint to TorchScript first via mjlab_rl's
-``scripts/export_to_jit.py``; this node consumes the resulting .jit file.
+``scripts/export_to_jit.py``; this node consumes the resulting .jit file. That
+exporter embeds the control contract (joint order, ``target_ref`` / home,
+``action_scale``, ``max_relative_target``, ``control_dt``) as a ``metadata.json``
+inside the .jit, and this node reads it on load — so it tracks whatever was
+trained without code edits. Metadata-less .jit files fall back to the built-in
+constants below.
 """
 
 from __future__ import annotations
 
+import json
 import time
 from typing import Optional
 
@@ -43,9 +49,12 @@ from sensor_msgs.msg import Image, JointState
 
 
 # ---------------------------------------------------------------------------
-# Constants — MUST match training. Source of truth is
-# ``mjlab_rl/mjlab_rl/assets/so101.py`` and ``mjlab_rl/tasks/block_picking.py``.
-# Duplicated here so this node doesn't import the simulator stack.
+# FALLBACK constants — used only for older .jit files that carry no embedded
+# metadata. The live contract (joint order, target_ref, action_scale,
+# max_relative_target, control_dt) is normally read from metadata embedded in
+# the .jit by ``mjlab_rl/scripts/export_to_jit.py``, so this node tracks
+# whatever was trained without code edits. These values mirror the sim defaults
+# in ``mjlab_rl/assets/so101.py`` at the time of writing.
 # ---------------------------------------------------------------------------
 
 SO101_JOINT_NAMES: tuple[str, ...] = (
@@ -96,7 +105,9 @@ class PolicyNode(Node):
         super().__init__('policy_node')
 
         self.declare_parameter('checkpoint_path', '')
-        self.declare_parameter('control_hz', 50.0)
+        # 0 => use the trained rate embedded in the .jit (control_dt); a positive
+        # value overrides it (and warns if it differs from what was trained).
+        self.declare_parameter('control_hz', 0.0)
         self.declare_parameter('device', 'auto')  # 'auto' | 'cpu' | 'cuda'
         self.declare_parameter('joint_states_topic', 'joint_states')
         self.declare_parameter('joint_command_topic', 'joint_command')
@@ -109,7 +120,7 @@ class PolicyNode(Node):
         self.declare_parameter('home_tol', 0.05)     # rad: within this of home => homed
         self.declare_parameter('home_timeout', 5.0)  # s: hand off to policy regardless after this
 
-        control_hz = float(self.get_parameter('control_hz').value)
+        param_hz = float(self.get_parameter('control_hz').value)
         device_str = str(self.get_parameter('device').value)
         if device_str == 'auto':
             device_str = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -119,13 +130,46 @@ class PolicyNode(Node):
         if not checkpoint_path:
             raise RuntimeError('checkpoint_path parameter is required')
         self.get_logger().info(f'loading policy from {checkpoint_path} on {self._device}')
-        self._policy = torch.jit.load(checkpoint_path, map_location=self._device)
+        extra = {'metadata.json': ''}
+        self._policy = torch.jit.load(checkpoint_path, map_location=self._device, _extra_files=extra)
         self._policy.eval()
 
-        # Cached constants as numpy arrays in the canonical joint order.
-        self._home = _by_joint_order(HOME_JOINT_POS)
-        self._scale = _by_joint_order(ACTION_SCALE)
-        self._max_rel = _by_joint_order(MAX_RELATIVE_TARGET)
+        # The control contract (joint order, action reference, scale, rate limit,
+        # control rate) is read from metadata embedded in the .jit by
+        # scripts/export_to_jit.py, so it always matches whatever was trained.
+        # Older metadata-less .jit files fall back to the built-in constants.
+        meta = json.loads(extra['metadata.json']) if extra['metadata.json'] else None
+        trained_hz: Optional[float] = None
+        if meta is not None:
+            self._joint_names = tuple(meta['joint_names'])
+            self._home = np.asarray(meta['target_ref'], dtype=np.float32)
+            self._scale = np.asarray(meta['action_scale'], dtype=np.float32)
+            self._max_rel = np.asarray(meta['max_relative_target'], dtype=np.float32)
+            if meta.get('control_dt'):
+                trained_hz = 1.0 / float(meta['control_dt'])
+            self.get_logger().info(f'loaded control contract from .jit metadata: {meta}')
+        else:
+            self._joint_names = SO101_JOINT_NAMES
+            self._home = _by_joint_order(HOME_JOINT_POS)
+            self._scale = _by_joint_order(ACTION_SCALE)
+            self._max_rel = _by_joint_order(MAX_RELATIVE_TARGET)
+            self.get_logger().warn(
+                'no metadata embedded in .jit; using built-in constants '
+                '(re-export with scripts/export_to_jit.py to embed the contract)'
+            )
+
+        # control_hz: explicit param overrides; otherwise use the trained rate;
+        # otherwise default to 50 Hz.
+        if param_hz > 0.0:
+            control_hz = param_hz
+            if trained_hz is not None and abs(control_hz - trained_hz) > 0.5:
+                self.get_logger().warn(
+                    f'control_hz override {control_hz:.1f} Hz differs from trained '
+                    f'{trained_hz:.1f} Hz — closed-loop dynamics will not match sim'
+                )
+        else:
+            control_hz = trained_hz if trained_hz is not None else 50.0
+        self.get_logger().info(f'control_hz={control_hz:.1f}')
 
         # Startup homing state.
         self._home_tol = float(self.get_parameter('home_tol').value)
@@ -137,7 +181,7 @@ class PolicyNode(Node):
         self._latest_joint_pos: Optional[np.ndarray] = None
         self._latest_wrist: Optional[np.ndarray] = None
         self._latest_top: Optional[np.ndarray] = None
-        self._last_action = np.zeros(len(SO101_JOINT_NAMES), dtype=np.float32)
+        self._last_action = np.zeros(len(self._joint_names), dtype=np.float32)
 
         # Inference-rate measurement (logged ~1 Hz once the policy is running).
         self._rate_window_start: Optional[float] = None
@@ -168,12 +212,12 @@ class PolicyNode(Node):
 
     def _on_joint_states(self, msg: JointState) -> None:
         positions = dict(zip(msg.name, msg.position))
-        missing = [n for n in SO101_JOINT_NAMES if n not in positions]
+        missing = [n for n in self._joint_names if n not in positions]
         if missing:
             self.get_logger().warn(f'joint_states missing: {missing}', throttle_duration_sec=2.0)
             return
         self._latest_joint_pos = np.array(
-            [positions[n] for n in SO101_JOINT_NAMES], dtype=np.float32
+            [positions[n] for n in self._joint_names], dtype=np.float32
         )
 
     def _on_wrist_image(self, msg: Image) -> None:
@@ -270,7 +314,7 @@ class PolicyNode(Node):
     def _publish_target(self, target: np.ndarray) -> None:
         msg = JointState()
         msg.header.stamp = self.get_clock().now().to_msg()
-        msg.name = list(SO101_JOINT_NAMES)
+        msg.name = list(self._joint_names)
         msg.position = target.astype(float).tolist()
         self._cmd_pub.publish(msg)
 

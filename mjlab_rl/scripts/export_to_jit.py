@@ -15,15 +15,21 @@ Example:
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+import torch
 import tyro
 
 import mjlab_rl  # noqa: F401  (registers tasks)
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
+
+# Name of the action term to read the control contract off of (see the
+# ``actions`` dict in mjlab_rl/tasks/block_picking.py).
+ACTION_TERM = "joint_pos"
 
 
 @dataclass(frozen=True)
@@ -32,6 +38,32 @@ class ExportConfig:
   out_dir: str | None = None
   filename: str = "policy.jit"
   device: str = "cpu"
+
+
+def _per_joint(value, n: int) -> list[float]:
+  """Normalize a scale/offset/max-rel (float or (num_envs, n) tensor) to a
+  per-joint list of length ``n``."""
+  if isinstance(value, torch.Tensor):
+    return [float(x) for x in value[0].detach().cpu().tolist()]
+  return [float(value)] * n
+
+
+def _build_metadata(base_env: ManagerBasedRlEnv) -> dict:
+  """The deployment contract, read off the live action term so it exactly
+  matches training: target = target_ref + action_scale * action, then clamped to
+  present ± max_relative_target. Embedded in the .jit so the deployment node
+  doesn't have to hardcode (and hand-sync) any of it."""
+  act = base_env.action_manager.get_term(ACTION_TERM)
+  names = list(act._target_names)
+  n = len(names)
+  return {
+    "joint_names": names,
+    "target_ref": _per_joint(act._offset, n),  # = home / default_joint_pos
+    "action_scale": _per_joint(act._scale, n),
+    "max_relative_target": _per_joint(act._max_rel, n),
+    "control_dt": float(base_env.step_dt),  # 0.02 s -> 50 Hz
+    "camera_hw": [64, 64],
+  }
 
 
 def run(task_id: str, cfg: ExportConfig) -> None:
@@ -46,14 +78,22 @@ def run(task_id: str, cfg: ExportConfig) -> None:
   env_cfg.terminations = {}
   agent_cfg = load_rl_cfg(task_id)
 
-  env = ManagerBasedRlEnv(cfg=env_cfg, device=cfg.device)
-  env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
+  base_env = ManagerBasedRlEnv(cfg=env_cfg, device=cfg.device)
+  env = RslRlVecEnvWrapper(base_env, clip_actions=agent_cfg.clip_actions)
   runner_cls = load_runner_cls(task_id) or MjlabOnPolicyRunner
   runner = runner_cls(env, asdict(agent_cfg), device=cfg.device)
   runner.load(str(ckpt), load_cfg={"actor": True}, strict=True, map_location=cfg.device)
 
   runner.export_policy_to_jit(str(out_dir), filename=cfg.filename)
-  print(f"[export_to_jit] wrote {out_dir / cfg.filename}")
+  jit_path = out_dir / cfg.filename
+  print(f"[export_to_jit] wrote {jit_path}")
+
+  # Embed the deployment contract inside the .jit (single file). The base
+  # rsl-rl export saves without _extra_files, so re-load and re-save with it.
+  metadata = _build_metadata(base_env)
+  module = torch.jit.load(str(jit_path), map_location="cpu")
+  module.save(str(jit_path), _extra_files={"metadata.json": json.dumps(metadata, indent=2)})
+  print(f"[export_to_jit] embedded metadata: {metadata}")
 
 
 def main() -> None:
