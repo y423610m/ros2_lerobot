@@ -216,6 +216,22 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       mode="reset",
       params={"p_on": 0.6, "ensure_one_on": True},
     ),
+    # Per-episode table-skin randomization. The mujoco-warp camera renderer is
+    # diffuse-only (it ignores material specular/shininess/reflectance — those
+    # affect only the OpenGL viewer), so the real table's narrow specular glint
+    # can't be reproduced. Instead, jitter the tabletop's RGB each episode
+    # (per channel) so the policy doesn't latch onto the sim table's exact
+    # shade/blur and stays robust to the real surface's varied appearance.
+    "randomize_table_color": EventTermCfg(
+      func=dr.mat_rgba,
+      mode="reset",
+      params={
+        "asset_cfg": SceneEntityCfg("table", material_names=("table_mat",)),
+        "ranges": (-0.08, 0.30),  # per-channel offset added to the default RGB
+        "operation": "add",
+        "axes": [0, 1, 2],        # RGB only; leave alpha opaque
+      },
+    ),
   }
 
   # Per-episode ±30% multiplicative jitter of the action scale and rate limit,
