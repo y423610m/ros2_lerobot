@@ -119,6 +119,12 @@ class PolicyNode(Node):
         self.declare_parameter('home_on_start', True)
         self.declare_parameter('home_tol', 0.05)     # rad: within this of home => homed
         self.declare_parameter('home_timeout', 5.0)  # s: hand off to policy regardless after this
+        # Per-tick step during homing. Deliberately larger than the policy's
+        # max_relative_target (which can be tiny, e.g. 0.025 rad) — homing is a
+        # plain move-to-pose, and too small a step never breaks servo stiction
+        # from a holding pose, deadlocking the rate clamp (present never
+        # advances => commanded target never advances).
+        self.declare_parameter('home_step', 0.1)     # rad/tick toward the target ref
 
         param_hz = float(self.get_parameter('control_hz').value)
         device_str = str(self.get_parameter('device').value)
@@ -142,16 +148,16 @@ class PolicyNode(Node):
         trained_hz: Optional[float] = None
         if meta is not None:
             self._joint_names = tuple(meta['joint_names'])
-            self._home = np.asarray(meta['target_ref'], dtype=np.float32)
-            self._scale = np.asarray(meta['action_scale'], dtype=np.float32)
+            self._target_ref = np.asarray(meta['target_ref'], dtype=np.float32)
+            self._action_scale = np.asarray(meta['action_scale'], dtype=np.float32)
             self._max_rel = np.asarray(meta['max_relative_target'], dtype=np.float32)
             if meta.get('control_dt'):
                 trained_hz = 1.0 / float(meta['control_dt'])
             self.get_logger().info(f'loaded control contract from .jit metadata: {meta}')
         else:
             self._joint_names = SO101_JOINT_NAMES
-            self._home = _by_joint_order(HOME_JOINT_POS)
-            self._scale = _by_joint_order(ACTION_SCALE)
+            self._target_ref = _by_joint_order(HOME_JOINT_POS)
+            self._action_scale = _by_joint_order(ACTION_SCALE)
             self._max_rel = _by_joint_order(MAX_RELATIVE_TARGET)
             self.get_logger().warn(
                 'no metadata embedded in .jit; using built-in constants '
@@ -173,9 +179,12 @@ class PolicyNode(Node):
 
         # Startup homing state.
         self._home_tol = float(self.get_parameter('home_tol').value)
+        self._home_step = float(self.get_parameter('home_step').value)
         self._homed = not bool(self.get_parameter('home_on_start').value)
         self._home_ticks = 0
         self._home_max_ticks = int(float(self.get_parameter('home_timeout').value) * control_hz)
+        # Commanded setpoint, ramped toward target_ref each tick (see _home_to_start).
+        self._home_setpoint: Optional[np.ndarray] = None
 
         # Caches populated by subscriber callbacks; consumed by the timer.
         self._latest_joint_pos: Optional[np.ndarray] = None
@@ -242,7 +251,7 @@ class PolicyNode(Node):
         or None if no policy is loaded / camera frames haven't arrived yet."""
         if self._policy is None or self._latest_wrist is None or self._latest_top is None:
             return None
-        joint_pos_rel = joint_pos - self._home  # mirrors mdp_obs.joint_pos_rel
+        joint_pos_rel = joint_pos - self._target_ref  # mirrors mdp_obs.joint_pos_rel
         state_obs = np.concatenate([joint_pos_rel, self._last_action], axis=0)
         cam_obs = np.concatenate([self._latest_wrist, self._latest_top], axis=0)
         state_t = torch.from_numpy(state_obs).to(self._device).unsqueeze(0)        # (1, 12)
@@ -266,7 +275,7 @@ class PolicyNode(Node):
         raw = self._run_policy(joint_pos)
         infer_dt = time.perf_counter() - t0
 
-        target = self._home + self._scale * raw
+        target = self._target_ref + self._action_scale * raw
         lo = joint_pos - self._max_rel
         hi = joint_pos + self._max_rel
         target = np.clip(target, lo, hi)
@@ -295,18 +304,43 @@ class PolicyNode(Node):
             self._rate_infer_accum = 0.0
 
     def _home_to_start(self, joint_pos: np.ndarray) -> None:
-        """Rate-limited move to the home pose before policy control begins, so
-        the arm starts each run from the configuration the sim resets to."""
-        target = np.clip(self._home, joint_pos - self._max_rel, joint_pos + self._max_rel)
-        self._publish_target(target)
+        """Move the arm to the target reference pose before policy control
+        begins, so the arm starts each run from the configuration the policy was
+        trained around.
+
+        The commanded setpoint is ramped toward ``target_ref`` by ``home_step``
+        per tick, starting from the pose at the first homing tick — *not*
+        clamped to the present joint position. Clamping to ``present`` (as the
+        policy's rate limiter does) deadlocks any joint that can't break stiction
+        in one step: present never advances, so the command never advances past
+        present ± step. Ramping the setpoint keeps the command moving so the
+        servo chases it (the same reason teleop's larger jumps move every joint).
+        """
+        if self._home_setpoint is None:
+            self._home_setpoint = joint_pos.copy()
+        step = np.clip(self._target_ref - self._home_setpoint, -self._home_step, self._home_step)
+        self._home_setpoint = self._home_setpoint + step
+        self._publish_target(self._home_setpoint)
         self._home_ticks += 1
-        if np.all(np.abs(joint_pos - self._home) < self._home_tol):
+
+        def _fmt(a: np.ndarray) -> str:
+            return '  '.join(f'{n}={v:+.3f}' for n, v in zip(self._joint_names, a))
+
+        self.get_logger().info(
+            'homing  cur: ' + _fmt(joint_pos) + '\n'
+            '        tgt: ' + _fmt(self._home_setpoint) + '\n'
+            '        ref: ' + _fmt(self._target_ref)
+            + f'   max|cur-ref|={float(np.abs(joint_pos - self._target_ref).max()):.3f} rad',
+            throttle_duration_sec=0.5,
+        )
+
+        if np.all(np.abs(joint_pos - self._target_ref) < self._home_tol):
             self.get_logger().info('reached home pose; handing off to policy')
             self._homed = True
         elif self._home_ticks >= self._home_max_ticks:
             self.get_logger().warn(
                 'home timeout; handing off to policy from current pose '
-                f'(max |Δ|={float(np.abs(joint_pos - self._home).max()):.3f} rad)'
+                f'(max |Δ|={float(np.abs(joint_pos - self._target_ref).max()):.3f} rad)'
             )
             assert False
             self._homed = True
@@ -316,6 +350,12 @@ class PolicyNode(Node):
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.name = list(self._joint_names)
         msg.position = target.astype(float).tolist()
+        # Match the teleop publishers (leader / leader_follower / follower) which
+        # always fill velocity and effort too. Leaving them empty is the one
+        # structural difference between this command message and the ones that
+        # drive the real arm correctly.
+        msg.velocity = [0.0] * len(msg.name)
+        msg.effort = [0.0] * len(msg.name)
         self._cmd_pub.publish(msg)
 
 
