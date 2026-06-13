@@ -218,6 +218,21 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     ),
   }
 
+  # Per-episode ±30% multiplicative jitter of the action scale and rate limit,
+  # per joint, around the nominal SO101_ACTION_SCALE / SO101_MAX_RELATIVE_TARGET.
+  # Training only: the play env (and thus the exported .jit metadata + the
+  # deployment node) keeps the nominal values.
+  if not play:
+    events["randomize_action_gains"] = EventTermCfg(
+      func=task_mdp.randomize_action_gains,
+      mode="reset",
+      params={
+        "action_name": "joint_pos",
+        "scale_range": (0.7, 1.3),
+        "max_rel_range": (0.7, 1.3),
+      },
+    )
+
   rewards = {
     "reach": RewardTermCfg(
       func=task_mdp.reach_block_reward,

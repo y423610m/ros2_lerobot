@@ -592,6 +592,46 @@ def randomize_cam_pos_in_image_plane(
   env.sim.model.cam_pos[env_ids, cam_id] = default_pos + offset
 
 
+def randomize_action_gains(
+  env: "ManagerBasedRlEnv",
+  env_ids: torch.Tensor | None,
+  action_name: str = "joint_pos",
+  scale_range: tuple[float, float] = (0.7, 1.3),
+  max_rel_range: tuple[float, float] = (0.7, 1.3),
+) -> None:
+  """Reset-mode event: per-episode, per-joint multiplicative randomization of
+  the joint-position action's ``scale`` and ``max_relative_target`` around their
+  nominal (cfg) values.
+
+  Makes the policy robust to actuator-gain and per-step-speed uncertainty on the
+  real arm (the policy can't assume its action maps to exactly the sim scale /
+  rate limit). Scale and rate limit are sampled independently per joint.
+
+  The nominal tensors are snapshotted on first call so repeated resets don't
+  compound. Only added to the *training* env (see block_picking.py); the play /
+  exported policy uses the nominal values, which is what the deployment node and
+  the embedded .jit metadata carry.
+  """
+  term = env.action_manager.get_term(action_name)
+  if not isinstance(term._scale, torch.Tensor) or not isinstance(term._max_rel, torch.Tensor):
+    # Only per-joint (dict-configured) scale/max_rel can be randomized per env.
+    return
+
+  if env_ids is None:
+    env_ids = torch.arange(env.num_envs, device=env.device)
+  env_ids = env_ids.to(env.device)
+
+  if not hasattr(term, "_nominal_scale"):
+    term._nominal_scale = term._scale.clone()
+    term._nominal_max_rel = term._max_rel.clone()
+
+  shape = (env_ids.shape[0], term.action_dim)
+  s_factor = torch.empty(shape, device=env.device).uniform_(scale_range[0], scale_range[1])
+  r_factor = torch.empty(shape, device=env.device).uniform_(max_rel_range[0], max_rel_range[1])
+  term._scale[env_ids] = term._nominal_scale[env_ids] * s_factor
+  term._max_rel[env_ids] = term._nominal_max_rel[env_ids] * r_factor
+
+
 def block_dropped(
   env: "ManagerBasedRlEnv",
   min_z: float = -0.05,

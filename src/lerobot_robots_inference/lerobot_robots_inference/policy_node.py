@@ -76,21 +76,21 @@ HOME_JOINT_POS: dict[str, float] = {
 }
 
 ACTION_SCALE: dict[str, float] = {
-    'shoulder_pan': 0.2,
-    'shoulder_lift': 0.2,
-    'elbow_flex': 0.2,
-    'wrist_flex': 0.2,
-    'wrist_roll': 0.2,
-    'gripper': 0.3,
+    'shoulder_pan': 0.5,
+    'shoulder_lift': 0.5,
+    'elbow_flex': 0.5,
+    'wrist_flex': 0.5,
+    'wrist_roll': 0.5,
+    'gripper': 0.8,
 }
 
 MAX_RELATIVE_TARGET: dict[str, float] = {
-    'shoulder_pan': 0.025,
-    'shoulder_lift': 0.025,
-    'elbow_flex': 0.025,
-    'wrist_flex': 0.025,
-    'wrist_roll': 0.025,
-    'gripper': 0.05,
+    'shoulder_pan': 0.1,
+    'shoulder_lift': 0.1,
+    'elbow_flex': 0.1,
+    'wrist_flex': 0.1,
+    'wrist_roll': 0.1,
+    'gripper': 0.3,
 }
 
 CAMERA_HW: tuple[int, int] = (64, 64)  # H, W expected by the actor's CNN

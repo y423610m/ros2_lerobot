@@ -54,12 +54,12 @@ HOME_JOINT_POS: dict[str, float] = {
 # action is multiplied by this scale before being added to the home pose, so
 # smaller values give the policy a tighter operating envelope around home.
 SO101_ACTION_SCALE: dict[str, float] = {
-  "shoulder_pan": 0.2,
-  "shoulder_lift": 0.2,
-  "elbow_flex": 0.2,
-  "wrist_flex": 0.2,
-  "wrist_roll": 0.2,
-  "gripper": 0.3,
+  "shoulder_pan": 0.5,
+  "shoulder_lift": 0.5,
+  "elbow_flex": 0.5,
+  "wrist_flex": 0.5,
+  "wrist_roll": 0.5,
+  "gripper": 0.8,
 }
 
 # Per-env-step (20 ms at decimation=4, timestep=0.005) max delta from the
@@ -67,12 +67,12 @@ SO101_ACTION_SCALE: dict[str, float] = {
 # clamp. Used both by the env's RateLimitedJointPositionAction at training
 # time and by the deployment-side rate limiter at inference.
 SO101_MAX_RELATIVE_TARGET: dict[str, float] = {
-  "shoulder_pan": 0.025,
-  "shoulder_lift": 0.025,
-  "elbow_flex": 0.025,
-  "wrist_flex": 0.025,
-  "wrist_roll": 0.025,
-  "gripper": 0.05,
+  "shoulder_pan": 0.1,
+  "shoulder_lift": 0.1,
+  "elbow_flex": 0.1,
+  "wrist_flex": 0.1,
+  "wrist_roll": 0.1,
+  "gripper": 0.3,
 }
 
 
