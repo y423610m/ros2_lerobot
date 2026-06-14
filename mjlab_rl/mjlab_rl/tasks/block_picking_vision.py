@@ -40,6 +40,7 @@ from mjlab.tasks.registry import register_mjlab_task
 
 from mjlab_rl.envs import mdp as task_mdp
 from mjlab_rl.tasks.block_picking import (
+  DOMAIN_RAND,
   make_block_picking_env_cfg,
   make_block_picking_ppo_cfg,
 )
@@ -167,6 +168,12 @@ def make_block_picking_vision_env_cfg(play: bool = False):
       "yaw_range": _TOP_RPY,
     },
   )
+
+  # Curriculum phase 1 (BLOCKPICK_DR=0): drop camera-extrinsics randomization so
+  # the policy learns to grasp against fixed cameras first; resume with DR on.
+  if not DOMAIN_RAND:
+    for _k in ("wrist_cam_pos", "wrist_cam_quat", "top_cam_pos", "top_cam_quat"):
+      cfg.events.pop(_k, None)
 
   # --- Observations -----------------------------------------------------
   # Strip privileged distance terms from the actor; it must learn them
