@@ -9,7 +9,6 @@ lift-to-target-pose task — no ``LiftingCommand`` involved).
 from __future__ import annotations
 
 import math
-import os
 
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp import actions as mdp_actions  # noqa: F401  (kept for compat)
@@ -53,14 +52,13 @@ from mjlab_rl.assets import (
 from mjlab_rl.envs import mdp as task_mdp
 from mjlab_rl.envs.actions import RateLimitedJointPositionActionCfg
 
-# Domain-randomization curriculum switch. Grasping a 2 cm block is a fragile
-# exploration bottleneck: it's only discovered via the lift reward, so any DR
-# (encoder bias, camera jitter, wide starts) that adds noise during exploration
-# tips the policy into the easy reach-only optimum. Train phase 1 with
-# BLOCKPICK_DR=0 (no DR, near-home starts) to learn grasping, then resume with
-# DR on (default) so it only *adapts* an already-grasping policy. Read once at
-# import (task registration). Vision task reads the same flag.
-DOMAIN_RAND = os.environ.get("BLOCKPICK_DR", "1").lower() not in ("0", "false", "no")
+# Domain-randomization curriculum. Grasping a 2 cm block is a fragile exploration
+# bottleneck: it's only discovered via the lift reward, so any DR (encoder bias,
+# camera jitter, wide starts) that adds noise during exploration tips the policy
+# into the easy reach-only optimum. Train phase 1 on the ``-NoDR`` task (no DR,
+# near-home starts) to learn grasping, then resume on the DR-on task (same
+# experiment_name) so it only *adapts* an already-grasping policy. The toggle is
+# the ``domain_rand`` arg to the cfg builders, selected by which task id you run.
 
 # ----------------------------------------------------------------------------
 # Geometry / randomization ranges. All numbers are in meters / radians.
@@ -91,7 +89,9 @@ CONTAINER_XY_RANGE = {
 # ----------------------------------------------------------------------------
 
 
-def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+def make_block_picking_env_cfg(
+  play: bool = False, domain_rand: bool = True
+) -> ManagerBasedRlEnvCfg:
   robot_cfg = SceneEntityCfg("robot", site_names=("gripperframe",))
 
   actor_terms = {
@@ -177,7 +177,7 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       params={
         # Wide ±0.3 only with DR on; near-home ±0.02 in the no-DR curriculum
         # phase so grasping is learned from a consistent start first.
-        "position_range": (-0.3, 0.3) if DOMAIN_RAND else (-0.02, 0.02),
+        "position_range": (-0.3, 0.3) if domain_rand else (-0.02, 0.02),
         "velocity_range": (0.0, 0.0),
         "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
       },
@@ -230,10 +230,10 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     ),
   }
 
-  # Curriculum phase 1 (BLOCKPICK_DR=0): drop the unobservable encoder-bias DR
+  # Curriculum phase 1 (domain_rand=False): drop the unobservable encoder-bias DR
   # so grasping is learned cleanly first. (Light randomization is cosmetic and
   # left on.) The wide-start range is already gated above.
-  if not DOMAIN_RAND:
+  if not domain_rand:
     events.pop("encoder_bias", None)
 
   rewards = {
@@ -525,6 +525,16 @@ register_mjlab_task(
   task_id="Mjlab-SO101-Block-Picking",
   env_cfg=make_block_picking_env_cfg(),
   play_env_cfg=make_block_picking_env_cfg(play=True),
+  rl_cfg=make_block_picking_ppo_cfg(),
+  runner_cls=ManipulationOnPolicyRunner,
+)
+
+# Curriculum phase-1 variant: no DR, near-home starts. Same experiment_name as
+# the DR-on task, so a phase-2 resume finds the phase-1 run automatically.
+register_mjlab_task(
+  task_id="Mjlab-SO101-Block-Picking-NoDR",
+  env_cfg=make_block_picking_env_cfg(domain_rand=False),
+  play_env_cfg=make_block_picking_env_cfg(play=True, domain_rand=False),
   rl_cfg=make_block_picking_ppo_cfg(),
   runner_cls=ManipulationOnPolicyRunner,
 )

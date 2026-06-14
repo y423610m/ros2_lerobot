@@ -40,7 +40,6 @@ from mjlab.tasks.registry import register_mjlab_task
 
 from mjlab_rl.envs import mdp as task_mdp
 from mjlab_rl.tasks.block_picking import (
-  DOMAIN_RAND,
   make_block_picking_env_cfg,
   make_block_picking_ppo_cfg,
 )
@@ -68,8 +67,8 @@ _CNN_CLASS = "mjlab.rl.spatial_softmax:SpatialSoftmaxCNNModel"
 # ----------------------------------------------------------------------------
 
 
-def make_block_picking_vision_env_cfg(play: bool = False):
-  cfg = make_block_picking_env_cfg(play=play)
+def make_block_picking_vision_env_cfg(play: bool = False, domain_rand: bool = True):
+  cfg = make_block_picking_env_cfg(play=play, domain_rand=domain_rand)
 
   # --- Cameras ----------------------------------------------------------
   shared = dict(
@@ -169,9 +168,9 @@ def make_block_picking_vision_env_cfg(play: bool = False):
     },
   )
 
-  # Curriculum phase 1 (BLOCKPICK_DR=0): drop camera-extrinsics randomization so
-  # the policy learns to grasp against fixed cameras first; resume with DR on.
-  if not DOMAIN_RAND:
+  # Curriculum phase 1 (domain_rand=False): drop camera-extrinsics randomization
+  # so the policy learns to grasp against fixed cameras first; resume with DR on.
+  if not domain_rand:
     for _k in ("wrist_cam_pos", "wrist_cam_quat", "top_cam_pos", "top_cam_quat"):
       cfg.events.pop(_k, None)
 
@@ -270,6 +269,17 @@ register_mjlab_task(
   task_id="Mjlab-SO101-Block-Picking-Rgb",
   env_cfg=make_block_picking_vision_env_cfg(),
   play_env_cfg=make_block_picking_vision_env_cfg(play=True),
+  rl_cfg=make_block_picking_vision_ppo_cfg(),
+  runner_cls=ManipulationOnPolicyRunner,
+)
+
+# Curriculum phase-1 variant: no DR (no camera jitter, no encoder bias, near-home
+# starts). Same experiment_name ("so101_block_picking_vision") as the DR-on task,
+# so a phase-2 resume finds the phase-1 run automatically.
+register_mjlab_task(
+  task_id="Mjlab-SO101-Block-Picking-Rgb-NoDR",
+  env_cfg=make_block_picking_vision_env_cfg(domain_rand=False),
+  play_env_cfg=make_block_picking_vision_env_cfg(play=True, domain_rand=False),
   rl_cfg=make_block_picking_vision_ppo_cfg(),
   runner_cls=ManipulationOnPolicyRunner,
 )
