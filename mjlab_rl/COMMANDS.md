@@ -222,14 +222,18 @@ checkpoint copying.
 ```bash
 # Phase 1 — learn to grasp. No DR: no camera jitter, no encoder bias,
 # near-home (±0.02 rad) episode starts.
-uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb-NoDR \
-    --env.scene.num-envs 4096 --agent.max-iterations 8000 \
-    --agent.logger tensorboard
+pixi run train-mjlab-vision-nodr               # 4096 envs, 8000 iters
 # Watch Episode_Reward/lift: it should climb off ~0 toward ~1–2 by ~1500–2000
 # iters. Note the run timestamp under logs/rsl_rl/so101_block_picking_vision/.
 
-# Phase 2 — adapt under full DR. Resume the phase-1 run (the DR-ON task id),
-# which re-enables camera pos/quat jitter, encoder bias, and ±0.3 rad starts.
+# Phase 2 — adapt under full DR. Resumes the phase-1 run (the DR-ON task id),
+# re-enabling camera pos/quat jitter, encoder bias, and ±0.3 rad starts.
+RUN=<phase1_timestamp> CKPT=model_8000.pt pixi run train-mjlab-vision-resume
+
+# --- Equivalent bare scripts ---
+uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb-NoDR \
+    --env.scene.num-envs 4096 --agent.max-iterations 8000 \
+    --agent.logger tensorboard
 uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb \
     --env.scene.num-envs 4096 --agent.max-iterations 20000 \
     --agent.logger tensorboard --agent.resume True \
