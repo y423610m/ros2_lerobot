@@ -243,6 +243,20 @@ def make_block_picking_env_cfg(
         "axes": [0, 1, 2],  # RGB only; leave alpha opaque
       },
     ),
+    # Jitter the (dark-gray) table color per episode for sim2real robustness —
+    # deliberately NOT colorful. operation="add" perturbs the (0.12, 0.12, 0.13)
+    # base; the small asymmetric range keeps the surface a dark black-gray
+    # (channels land in ~[0.07, 0.27]) with slight brightness + tint noise.
+    "randomize_table_color": EventTermCfg(
+      func=dr.mat_rgba,
+      mode="reset",
+      params={
+        "asset_cfg": SceneEntityCfg("table", material_names=("table_mat",)),
+        "ranges": (-0.05, 0.15),  # per-channel offset added to the dark base
+        "operation": "add",
+        "axes": [0, 1, 2],  # RGB only; leave alpha opaque
+      },
+    ),
   }
 
   # Curriculum phase 1 (domain_rand=False): drop the unobservable encoder-bias DR
@@ -252,6 +266,7 @@ def make_block_picking_env_cfg(
   if not domain_rand:
     events.pop("encoder_bias", None)
     events.pop("randomize_block_color", None)
+    events.pop("randomize_table_color", None)
 
   rewards = {
     "reach": RewardTermCfg(
