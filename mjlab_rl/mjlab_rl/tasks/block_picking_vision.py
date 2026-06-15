@@ -67,8 +67,8 @@ _CNN_CLASS = "mjlab.rl.spatial_softmax:SpatialSoftmaxCNNModel"
 # ----------------------------------------------------------------------------
 
 
-def make_block_picking_vision_env_cfg(play: bool = False, domain_rand: bool = True):
-  cfg = make_block_picking_env_cfg(play=play, domain_rand=domain_rand)
+def make_block_picking_vision_env_cfg(play: bool = False, dr_level: str = "full"):
+  cfg = make_block_picking_env_cfg(play=play, dr_level=dr_level)
 
   # --- Cameras ----------------------------------------------------------
   shared = dict(
@@ -168,9 +168,10 @@ def make_block_picking_vision_env_cfg(play: bool = False, domain_rand: bool = Tr
     },
   )
 
-  # Curriculum phase 1 (domain_rand=False): drop camera-extrinsics randomization
-  # so the policy learns to grasp against fixed cameras first; resume with DR on.
-  if not domain_rand:
+  # Camera-extrinsics jitter is geometric DR -> full level only. At none/soft the
+  # policy learns/keeps the grasp against fixed cameras (soft still varies the
+  # block/table appearance, just not the camera pose).
+  if dr_level != "full":
     for _k in ("wrist_cam_pos", "wrist_cam_quat", "top_cam_pos", "top_cam_quat"):
       cfg.events.pop(_k, None)
 
@@ -273,13 +274,22 @@ register_mjlab_task(
   runner_cls=ManipulationOnPolicyRunner,
 )
 
-# Curriculum phase-1 variant: no DR (no camera jitter, no encoder bias, near-home
-# starts). Same experiment_name ("so101_block_picking_vision") as the DR-on task,
-# so a phase-2 resume finds the phase-1 run automatically.
+# Curriculum variants (same experiment_name "so101_block_picking_vision", so each
+# stage's resume finds the prior run). Ramp NoDR -> SoftDR -> full:
+#   NoDR   : no DR, vivid pink, fixed cameras, near-home starts.
+#   SoftDR : block/table color + lights vary; cameras fixed, near-home starts.
+#   (full) : + camera jitter, encoder bias, wide +/-0.3 starts.
 register_mjlab_task(
   task_id="Mjlab-SO101-Block-Picking-Rgb-NoDR",
-  env_cfg=make_block_picking_vision_env_cfg(domain_rand=False),
-  play_env_cfg=make_block_picking_vision_env_cfg(play=True, domain_rand=False),
+  env_cfg=make_block_picking_vision_env_cfg(dr_level="none"),
+  play_env_cfg=make_block_picking_vision_env_cfg(play=True, dr_level="none"),
+  rl_cfg=make_block_picking_vision_ppo_cfg(),
+  runner_cls=ManipulationOnPolicyRunner,
+)
+register_mjlab_task(
+  task_id="Mjlab-SO101-Block-Picking-Rgb-SoftDR",
+  env_cfg=make_block_picking_vision_env_cfg(dr_level="soft"),
+  play_env_cfg=make_block_picking_vision_env_cfg(play=True, dr_level="soft"),
   rl_cfg=make_block_picking_vision_ppo_cfg(),
   runner_cls=ManipulationOnPolicyRunner,
 )

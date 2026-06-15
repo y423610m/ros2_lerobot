@@ -210,39 +210,41 @@ uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb \
     --agent.logger tensorboard
 ```
 
-### DR curriculum (two phases) — recommended
+### DR curriculum (three phases) — recommended
 
-Grasping a 2 cm block is a fragile exploration bottleneck; training with full
+Grasping a 2 cm block is a fragile exploration bottleneck. Training with full
 domain randomization from scratch tips the policy into a reach-only optimum and
-it never learns to lift. So learn the grasp first **without** DR, then resume
-**with** DR to adapt. The two tasks share `experiment_name`
-(`so101_block_picking_vision`), so phase 2 resumes the phase-1 run directly — no
-checkpoint copying.
+it never learns to lift — and turning **all** DR on at once *after* the grasp is
+learned collapses it at the resume boundary just the same (observed: lift
+0.38→0.00, never recovers). So **ramp DR in three stages**, each a task id
+sharing `experiment_name` (`so101_block_picking_vision`) so every resume finds
+the prior run with no checkpoint copying:
+
+| stage | task id | DR active |
+|---|---|---|
+| 1 NoDR | `…-Rgb-NoDR` | none — vivid-pink block, fixed cameras, ±0.02 starts |
+| 2 SoftDR | `…-Rgb-SoftDR` | block color (pink↔salmon) + table color + lights; cameras fixed, ±0.02 starts |
+| 3 full | `…-Rgb` | + camera jitter, encoder bias, ±0.3 starts |
 
 ```bash
-# Phase 1 — learn to grasp. No DR: no camera jitter, no encoder bias,
-# near-home (±0.02 rad) episode starts.
-pixi run train-mjlab-vision-nodr               # 4096 envs, 8000 iters
-# Watch Episode_Reward/lift: it should climb off ~0 toward ~1–2 by ~1500–2000
-# iters. Note the run timestamp under logs/rsl_rl/so101_block_picking_vision/.
+# Phase 1 — learn the grasp, no DR. Watch Episode_Reward/lift climb off ~0.
+pixi run train-mjlab-vision-nodr                                  # ~8000 iters
 
-# Phase 2 — adapt under full DR. Resumes the phase-1 run (the DR-ON task id),
-# re-enabling camera pos/quat jitter, encoder bias, and ±0.3 rad starts.
-RUN=<phase1_timestamp> CKPT=model_8000.pt pixi run train-mjlab-vision-resume
+# Phase 2 — adapt to appearance (block/table color, lights) WITHOUT touching
+# grasp geometry. Resume the phase-1 run; lift should dip then recover.
+RUN=<phase1_ts> CKPT=model_8000.pt pixi run train-mjlab-vision-softdr-resume
 
-# --- Equivalent bare scripts ---
-uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb-NoDR \
-    --env.scene.num-envs 4096 --agent.max-iterations 8000 \
-    --agent.logger tensorboard
-uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb \
-    --env.scene.num-envs 4096 --agent.max-iterations 20000 \
-    --agent.logger tensorboard --agent.resume True \
-    --agent.load-run <phase1_timestamp> --agent.load-checkpoint model_8000.pt
+# Phase 3 — add the geometric DR (camera jitter, encoder bias, wide starts).
+RUN=<phase2_ts> CKPT=model_16000.pt pixi run train-mjlab-vision-resume
 ```
 
-> The plain `Mjlab-SO101-Block-Picking-Rgb` task (and the state-only
-> `Mjlab-SO101-Block-Picking`) is DR-on by default — use it directly if you
-> aren't running the curriculum. Each has a matching `-NoDR` variant.
+At each resume watch `Episode_Reward/lift`/`success`: a transient dip is fine,
+but if it goes to ~0 and stays there, that stage's shock is still too large —
+shrink that stage's ranges (e.g. block-color span, start range) before going on.
+
+> The plain `Mjlab-SO101-Block-Picking-Rgb` task (and state-only
+> `Mjlab-SO101-Block-Picking`) is full-DR by default — use it directly if you
+> aren't running the curriculum. Each has matching `-NoDR` and `-SoftDR` variants.
 
 ### Replay a trained vision policy
 

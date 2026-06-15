@@ -53,12 +53,24 @@ from mjlab_rl.envs import mdp as task_mdp
 from mjlab_rl.envs.actions import RateLimitedJointPositionActionCfg
 
 # Domain-randomization curriculum. Grasping a 2 cm block is a fragile exploration
-# bottleneck: it's only discovered via the lift reward, so any DR (encoder bias,
-# camera jitter, wide starts) that adds noise during exploration tips the policy
-# into the easy reach-only optimum. Train phase 1 on the ``-NoDR`` task (no DR,
-# near-home starts) to learn grasping, then resume on the DR-on task (same
-# experiment_name) so it only *adapts* an already-grasping policy. The toggle is
-# the ``domain_rand`` arg to the cfg builders, selected by which task id you run.
+# bottleneck: it's only discovered via the lift reward, so any DR that adds noise
+# during exploration tips the policy into the easy reach-only optimum. Turning all
+# DR on at once *after* grasping is learned is just as fatal — the grasp collapses
+# at the resume boundary and never recovers. So ramp DR in three stages, each a
+# separate task id sharing one experiment_name (so resume finds the prior run):
+#
+#   dr_level="none" (``-NoDR``)  : no DR, vivid-pink block, near-home (+/-0.02)
+#                                  starts. Learn the grasp here.
+#   dr_level="soft" (``-SoftDR``): appearance DR only — block color (spanning
+#                                  pink<->salmon, so no visual cliff), table-color
+#                                  noise, lights. Geometry unchanged (near-home
+#                                  starts, no camera jitter, no encoder bias).
+#                                  The vision actor adapts appearance while the
+#                                  grasp survives.
+#   dr_level="full" (default)    : everything — wide +/-0.3 starts, encoder bias,
+#                                  camera pos/quat jitter, on top of soft DR.
+#
+# Workflow: train NoDR -> resume SoftDR -> resume full DR.
 
 # ----------------------------------------------------------------------------
 # Geometry / randomization ranges. All numbers are in meters / radians.
@@ -90,8 +102,14 @@ CONTAINER_XY_RANGE = {
 
 
 def make_block_picking_env_cfg(
-  play: bool = False, domain_rand: bool = True
+  play: bool = False, dr_level: str = "full"
 ) -> ManagerBasedRlEnvCfg:
+  assert dr_level in ("none", "soft", "full"), dr_level
+  # Appearance DR (block/table color) is on for soft and full; geometric DR
+  # (wide starts, encoder bias, camera jitter) is full-only.
+  appearance_dr = dr_level in ("soft", "full")
+  geometric_dr = dr_level == "full"
+
   robot_cfg = SceneEntityCfg("robot", site_names=("gripperframe",))
 
   actor_terms = {
@@ -175,9 +193,9 @@ def make_block_picking_env_cfg(
       func=mdp_events.reset_joints_by_offset,
       mode="reset",
       params={
-        # Wide ±0.3 only with DR on; near-home ±0.02 in the no-DR curriculum
-        # phase so grasping is learned from a consistent start first.
-        "position_range": (-0.3, 0.3) if domain_rand else (-0.02, 0.02),
+        # Wide ±0.3 only at full DR; near-home ±0.02 for none/soft so the grasp
+        # geometry is unchanged until the policy is robust to appearance first.
+        "position_range": (-0.3, 0.3) if geometric_dr else (-0.02, 0.02),
         "velocity_range": (0.0, 0.0),
         "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
       },
@@ -228,17 +246,18 @@ def make_block_picking_env_cfg(
       mode="reset",
       params={"p_on": 0.6, "ensure_one_on": True},
     ),
-    # Repaint the block to the real target's salmon tone (1.0, 0.72, 0.62) with
-    # ±0.05 per-channel noise each episode. operation="abs" sets the color
-    # absolutely (ignores the vivid-pink base), so with DR on the policy sees
-    # the deployment color + slight variation; with DR off this event is
-    # dropped and the easy-to-localize vivid base is used for grasp learning.
+    # Per-episode block color spanning the full range from the vivid pink the
+    # NoDR phase trained on (1.0, 0.40, 0.70) to the real target's salmon
+    # (1.0, 0.72, 0.62). operation="abs" sets the color absolutely; the ranges
+    # cover BOTH endpoints (+ a little margin) so there is no visual cliff at the
+    # NoDR->SoftDR boundary — the policy still sees pink sometimes and adapts to
+    # salmon gradually, while staying robust to the deployment color.
     "randomize_block_color": EventTermCfg(
       func=dr.mat_rgba,
       mode="reset",
       params={
         "asset_cfg": SceneEntityCfg("block", material_names=("block_mat",)),
-        "ranges": {0: (0.95, 1.0), 1: (0.67, 0.77), 2: (0.57, 0.67)},
+        "ranges": {0: (0.95, 1.0), 1: (0.38, 0.77), 2: (0.57, 0.72)},
         "operation": "abs",
         "axes": [0, 1, 2],  # RGB only; leave alpha opaque
       },
@@ -259,14 +278,13 @@ def make_block_picking_env_cfg(
     ),
   }
 
-  # Curriculum phase 1 (domain_rand=False): drop the unobservable encoder-bias DR
-  # and the block recolor so grasping is learned cleanly on the vivid block.
-  # (Light randomization is cosmetic and left on.) The wide-start range is
-  # already gated above.
-  if not domain_rand:
-    events.pop("encoder_bias", None)
+  # Drop DR events not active at this curriculum level. Light randomization is
+  # cosmetic and left on at all levels. The wide-start range is gated above.
+  if not appearance_dr:  # dr_level == "none"
     events.pop("randomize_block_color", None)
     events.pop("randomize_table_color", None)
+  if not geometric_dr:  # dr_level in ("none", "soft")
+    events.pop("encoder_bias", None)
 
   rewards = {
     "reach": RewardTermCfg(
@@ -561,12 +579,20 @@ register_mjlab_task(
   runner_cls=ManipulationOnPolicyRunner,
 )
 
-# Curriculum phase-1 variant: no DR, near-home starts. Same experiment_name as
-# the DR-on task, so a phase-2 resume finds the phase-1 run automatically.
+# Curriculum variants (same experiment_name, so each stage's resume finds the
+# prior run): NoDR = no DR; SoftDR = appearance DR only (color/lights, near-home
+# geometry). Ramp NoDR -> SoftDR -> full.
 register_mjlab_task(
   task_id="Mjlab-SO101-Block-Picking-NoDR",
-  env_cfg=make_block_picking_env_cfg(domain_rand=False),
-  play_env_cfg=make_block_picking_env_cfg(play=True, domain_rand=False),
+  env_cfg=make_block_picking_env_cfg(dr_level="none"),
+  play_env_cfg=make_block_picking_env_cfg(play=True, dr_level="none"),
+  rl_cfg=make_block_picking_ppo_cfg(),
+  runner_cls=ManipulationOnPolicyRunner,
+)
+register_mjlab_task(
+  task_id="Mjlab-SO101-Block-Picking-SoftDR",
+  env_cfg=make_block_picking_env_cfg(dr_level="soft"),
+  play_env_cfg=make_block_picking_env_cfg(play=True, dr_level="soft"),
   rl_cfg=make_block_picking_ppo_cfg(),
   runner_cls=ManipulationOnPolicyRunner,
 )
