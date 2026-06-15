@@ -48,14 +48,14 @@ play-mjlab-zero = "cd $PIXI_PROJECT_ROOT/mjlab_rl && uv run python scripts/play.
 
 # ----- Vision variant (Mjlab-SO101-Block-Picking-Rgb) -----
 # Train from scratch with the wrist + top-down camera setup.
-train-mjlab-vision = "cd $PIXI_PROJECT_ROOT/mjlab_rl && bash -c 'uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb --env.scene.num-envs ${NENV:-4096} --agent.max-iterations ${ITER:-10000} --agent.logger tensorboard'"
+train-mjlab-vision = "cd $PIXI_PROJECT_ROOT/mjlab_rl && bash -c 'uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb --env.scene.num-envs ${NENV:-1024} --agent.max-iterations ${ITER:-10000} --agent.logger tensorboard'"
 # DR curriculum phase 1: learn the grasp with no domain randomization
 # (no camera jitter / encoder bias, near-home starts).
-train-mjlab-vision-nodr = "cd $PIXI_PROJECT_ROOT/mjlab_rl && bash -c 'uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb-NoDR --env.scene.num-envs ${NENV:-4096} --agent.max-iterations ${ITER:-8000} --agent.logger tensorboard'"
+train-mjlab-vision-nodr = "cd $PIXI_PROJECT_ROOT/mjlab_rl && bash -c 'uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb-NoDR --env.scene.num-env ${NENV:-1024} --agent.max-iterations ${ITER:-8000} --agent.logger tensorboard'"
 # DR curriculum phase 2: resume the phase-1 run under full DR (same
 # experiment_name, so it finds the phase-1 checkpoint). Set RUN/CKPT to the
 # phase-1 timestamp/checkpoint, e.g. RUN=2026-06-15_.. CKPT=model_8000.pt.
-train-mjlab-vision-resume = "cd $PIXI_PROJECT_ROOT/mjlab_rl && bash -c 'uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb --env.scene.num-envs ${NENV:-4096} --agent.max-iterations ${ITER:-20000} --agent.logger tensorboard --agent.resume True --agent.load-run ${RUN:-.*} --agent.load-checkpoint ${CKPT:-model_.*.pt}'"
+train-mjlab-vision-resume = "cd $PIXI_PROJECT_ROOT/mjlab_rl && bash -c 'uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb --env.scene.num-envs ${NENV:-1024} --agent.max-iterations ${ITER:-20000} --agent.logger tensorboard --agent.resume True --agent.load-run ${RUN:-.*} --agent.load-checkpoint ${CKPT:-model_.*.pt}'"
 # Replay the vision policy in viser. This uses the DR-ON task, so reset events
 # (camera jitter, encoder bias, wide starts, salmon block + color noise) still
 # fire in play mode — useful to see the policy under deployment-like variation.
