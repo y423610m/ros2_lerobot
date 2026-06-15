@@ -47,11 +47,15 @@ def _make_block_spec() -> mujoco.MjSpec:
   # Matte "sponge" material: no specular highlights, no mirror reflection.
   # Color stays stable under any lighting (no white wash-out when multiple
   # randomized lights happen to align with the camera's reflection vector).
-  # Light salmon / skin tone to match the real target (a soft pink-orange,
-  # not the previous vivid magenta-pink).
+  # Base color is VIVID pink — high-saturation, easy to localize in the 64x64
+  # camera frames. This is the color the no-DR curriculum phase trains on. With
+  # DR on, the ``randomize_block_color`` event (block_picking.py) repaints the
+  # block to the real target's salmon tone ± slight noise each episode, so the
+  # deployed policy is robust to the real block color without paying the
+  # localization cost during the fragile grasp-learning phase.
   spec.add_material(
     name="block_mat",
-    rgba=(1.00, 0.72, 0.62, 1.0),
+    rgba=(1.00, 0.40, 0.70, 1.0),
     specular=0.0,
     shininess=0.0,
     reflectance=0.0,

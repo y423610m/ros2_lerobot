@@ -56,8 +56,13 @@ train-mjlab-vision-nodr = "cd $PIXI_PROJECT_ROOT/mjlab_rl && bash -c 'uv run pyt
 # experiment_name, so it finds the phase-1 checkpoint). Set RUN/CKPT to the
 # phase-1 timestamp/checkpoint, e.g. RUN=2026-06-15_.. CKPT=model_8000.pt.
 train-mjlab-vision-resume = "cd $PIXI_PROJECT_ROOT/mjlab_rl && bash -c 'uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb --env.scene.num-envs ${NENV:-4096} --agent.max-iterations ${ITER:-20000} --agent.logger tensorboard --agent.resume True --agent.load-run ${RUN:-.*} --agent.load-checkpoint ${CKPT:-model_.*.pt}'"
-# Replay the vision policy in viser.
+# Replay the vision policy in viser. This uses the DR-ON task, so reset events
+# (camera jitter, encoder bias, wide starts, salmon block + color noise) still
+# fire in play mode — useful to see the policy under deployment-like variation.
 play-mjlab-vision-trained = "cd $PIXI_PROJECT_ROOT/mjlab_rl && bash -c 'uv run python scripts/play.py Mjlab-SO101-Block-Picking-Rgb --viewer viser --checkpoint-file ${CKPT:?set CKPT=path/to/model.pt}'"
+# Same, but the NoDR task: no camera jitter / encoder bias, near-home starts,
+# vivid-pink block. Clean deterministic eval (matches the phase-1 conditions).
+play-mjlab-vision-trained-nodr = "cd $PIXI_PROJECT_ROOT/mjlab_rl && bash -c 'uv run python scripts/play.py Mjlab-SO101-Block-Picking-Rgb-NoDR --viewer viser --checkpoint-file ${CKPT:?set CKPT=path/to/model.pt}'"
 # Inspect the static vision scene (no checkpoint) — viser sidebar shows the camera feeds.
 play-mjlab-vision-zero = "cd $PIXI_PROJECT_ROOT/mjlab_rl && uv run python scripts/play.py Mjlab-SO101-Block-Picking-Rgb --viewer viser --agent zero --num-envs 1 --no-terminations True"
 # Same as play-mjlab-vision-zero but with a "Print camera pose" button in

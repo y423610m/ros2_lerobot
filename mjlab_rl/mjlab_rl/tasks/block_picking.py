@@ -228,13 +228,30 @@ def make_block_picking_env_cfg(
       mode="reset",
       params={"p_on": 0.6, "ensure_one_on": True},
     ),
+    # Repaint the block to the real target's salmon tone (1.0, 0.72, 0.62) with
+    # ±0.05 per-channel noise each episode. operation="abs" sets the color
+    # absolutely (ignores the vivid-pink base), so with DR on the policy sees
+    # the deployment color + slight variation; with DR off this event is
+    # dropped and the easy-to-localize vivid base is used for grasp learning.
+    "randomize_block_color": EventTermCfg(
+      func=dr.mat_rgba,
+      mode="reset",
+      params={
+        "asset_cfg": SceneEntityCfg("block", material_names=("block_mat",)),
+        "ranges": {0: (0.95, 1.0), 1: (0.67, 0.77), 2: (0.57, 0.67)},
+        "operation": "abs",
+        "axes": [0, 1, 2],  # RGB only; leave alpha opaque
+      },
+    ),
   }
 
   # Curriculum phase 1 (domain_rand=False): drop the unobservable encoder-bias DR
-  # so grasping is learned cleanly first. (Light randomization is cosmetic and
-  # left on.) The wide-start range is already gated above.
+  # and the block recolor so grasping is learned cleanly on the vivid block.
+  # (Light randomization is cosmetic and left on.) The wide-start range is
+  # already gated above.
   if not domain_rand:
     events.pop("encoder_bias", None)
+    events.pop("randomize_block_color", None)
 
   rewards = {
     "reach": RewardTermCfg(
