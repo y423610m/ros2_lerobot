@@ -16,10 +16,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import torch
+import torch.nn.functional as F
 
 from mjlab.entity import Entity
 from mjlab.managers.event_manager import requires_model_fields
 from mjlab.managers.scene_entity_config import SceneEntityCfg
+from mjlab.tasks.manipulation.mdp import camera_rgb
 from mjlab.utils.lab_api.math import matrix_from_quat
 
 if TYPE_CHECKING:
@@ -29,6 +31,87 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # Observations.
 # ---------------------------------------------------------------------------
+
+
+def _gaussian_kernel2d(sigma: float, device: torch.device) -> torch.Tensor:
+  """Normalized 2-D Gaussian kernel, shape ``(1, 1, k, k)``."""
+  radius = max(1, int(round(3.0 * sigma)))
+  x = torch.arange(-radius, radius + 1, device=device, dtype=torch.float32)
+  g = torch.exp(-(x**2) / (2.0 * sigma * sigma))
+  g = g / g.sum()
+  k = torch.outer(g, g)
+  return k.view(1, 1, k.shape[0], k.shape[1])
+
+
+def _batched_gaussian_blur(img: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
+  """Per-sample Gaussian blur. ``img`` is ``(B, C, H, W)``; ``sigma`` is ``(B,)``
+  in pixels. Sigmas are quantized to 0.5-px buckets and each non-zero bucket is
+  blurred as one batched depthwise conv (cheap, fully on-GPU)."""
+  b, c, _, _ = img.shape
+  q = torch.round(sigma / 0.5).long().clamp(0, 8)  # 0..8 -> sigma 0..4.0 px
+  out = img.clone()
+  for bucket in torch.unique(q):
+    lvl = int(bucket.item())
+    if lvl == 0:
+      continue
+    sel = q == bucket
+    s = lvl * 0.5
+    kernel = _gaussian_kernel2d(s, img.device)
+    ks = kernel.shape[-1]
+    weight = kernel.expand(c, 1, ks, ks)
+    out[sel] = F.conv2d(img[sel], weight, padding=ks // 2, groups=c)
+  return out
+
+
+def camera_rgb_aug(
+  env: "ManagerBasedRlEnv",
+  sensor_name: str,
+  blur_strength: float = 0.0,
+  noise_std: float = 0.0,
+  brightness: float = 0.0,
+  contrast: float = 0.0,
+  motion_ref: float = 5.0,
+  robot_name: str = "robot",
+) -> torch.Tensor:
+  """:func:`mjlab.tasks.manipulation.mdp.camera_rgb` plus sim-to-real image
+  augmentation, preserving shape/dtype/range ``(B, 3, H, W)`` float in ``[0, 1]``.
+
+  * **Motion blur** — Gaussian blur whose per-env sigma scales with the arm's
+    joint-motion magnitude (``sum |joint_vel|`` normalized by ``motion_ref``)
+    up to ``blur_strength`` px, mimicking the real camera smearing while the
+    robot moves. ``joint_vel`` is read only to *size* the blur; it is not
+    exposed in the observation.
+  * **Brightness/contrast** — per-env scalar gain+offset of magnitude
+    ``contrast``/``brightness``.
+  * **Pixel noise** — additive Gaussian with std ``noise_std``.
+
+  All strengths default to 0 → an identity wrapper of ``camera_rgb`` (used at
+  ``dr_level="none"``)."""
+  rgb = camera_rgb(env, sensor_name)  # (B, 3, H, W) float [0, 1]
+  if blur_strength <= 0 and noise_std <= 0 and brightness <= 0 and contrast <= 0:
+    return rgb
+
+  b = rgb.shape[0]
+  dev = rgb.device
+
+  if blur_strength > 0:
+    vel = env.scene[robot_name].data.joint_vel  # (B, nj)
+    motion = vel.abs().sum(dim=-1)  # (B,)
+    frac = (motion / motion_ref).clamp(0.0, 1.0)
+    # Small random floor so some frames blur even when nearly still.
+    frac = torch.maximum(frac, torch.rand(b, device=dev) * 0.3)
+    rgb = _batched_gaussian_blur(rgb, frac * blur_strength)
+
+  if contrast > 0:
+    gain = 1.0 + (torch.rand(b, 1, 1, 1, device=dev) * 2 - 1) * contrast
+    mean = rgb.mean(dim=(-1, -2), keepdim=True)
+    rgb = (rgb - mean) * gain + mean
+  if brightness > 0:
+    rgb = rgb + (torch.rand(b, 1, 1, 1, device=dev) * 2 - 1) * brightness
+  if noise_std > 0:
+    rgb = rgb + torch.randn_like(rgb) * noise_std
+
+  return rgb.clamp(0.0, 1.0)
 
 
 def ee_to_block(
@@ -630,6 +713,47 @@ def randomize_action_gains(
   r_factor = torch.empty(shape, device=env.device).uniform_(max_rel_range[0], max_rel_range[1])
   term._scale[env_ids] = term._nominal_scale[env_ids] * s_factor
   term._max_rel[env_ids] = term._nominal_max_rel[env_ids] * r_factor
+
+
+def randomize_actuator_lag(
+  env: "ManagerBasedRlEnv",
+  env_ids: torch.Tensor | None,
+  action_name: str = "joint_pos",
+  alpha_range: tuple[float, float] = (0.5, 1.0),
+  lag_range: tuple[int, int] = (0, 6),
+) -> None:
+  """Reset-mode event: per-episode servo-lag DR for **all joints**.
+
+  Sets the :class:`RateLimitedJointPositionAction`'s servo-realism state so the
+  simulated arm tracks targets with the finite bandwidth + latency of the real
+  STS-3215 servos (the sim arm otherwise reaches targets almost instantly):
+
+  * ``_lpf_alpha`` — per-(env, joint) first-order low-pass coefficient sampled in
+    ``alpha_range`` (1.0 = instant, lower = slower). Every joint, including the
+    gripper, gets an independent value.
+  * ``_action_lag`` — per-env integer transport delay in physics substeps sampled
+    in ``lag_range`` (whole-arm latency).
+
+  Only added to the *training* env at the full DR level (see block_picking.py);
+  play / export use the inert defaults (alpha 1, lag 0), so this changes sim
+  dynamics only — never the exported action contract."""
+  term = env.action_manager.get_term(action_name)
+  if not hasattr(term, "_lpf_alpha"):
+    return
+
+  if env_ids is None:
+    env_ids = torch.arange(env.num_envs, device=env.device)
+  env_ids = env_ids.to(env.device)
+
+  shape = (env_ids.shape[0], term.action_dim)
+  term._lpf_alpha[env_ids] = torch.empty(shape, device=env.device).uniform_(
+    alpha_range[0], alpha_range[1]
+  )
+  if getattr(term, "_action_lag", None) is not None:
+    lo, hi = int(lag_range[0]), int(lag_range[1])
+    term._action_lag[env_ids] = torch.randint(
+      lo, hi + 1, (env_ids.shape[0],), device=env.device
+    )
 
 
 def block_dropped(

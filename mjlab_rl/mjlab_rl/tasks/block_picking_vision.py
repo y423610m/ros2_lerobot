@@ -34,7 +34,6 @@ from mjlab.rl import (
   RslRlPpoAlgorithmCfg,
 )
 from mjlab.sensor import CameraSensorCfg
-from mjlab.tasks.manipulation import mdp as manipulation_mdp
 from mjlab.tasks.manipulation.rl import ManipulationOnPolicyRunner
 from mjlab.tasks.registry import register_mjlab_task
 
@@ -190,14 +189,28 @@ def make_block_picking_vision_env_cfg(play: bool = False, dr_level: str = "full"
   # joint_vel — fine, the critic only runs in sim).
 
   # Camera group — concatenated along channel dim (6 = 2 cams × 3 RGB).
+  # Image realism (sim2real) at soft/full: motion blur + pixel noise +
+  # brightness/contrast via camera_rgb_aug, and camera latency via the obs
+  # term's built-in delay buffer. At none the aug params are 0 (identity wrapper
+  # of camera_rgb) and there is no delay, matching the sharp clean sim image.
+  img_aug = dr_level in ("soft", "full")
+  aug_params = dict(
+    blur_strength=2.0 if img_aug else 0.0,  # max Gaussian sigma (px) at full motion
+    noise_std=0.02 if img_aug else 0.0,
+    brightness=0.10 if img_aug else 0.0,
+    contrast=0.10 if img_aug else 0.0,
+  )
+  cam_lag = 1 if img_aug else 0  # camera latency, control steps (0-20 ms)
   cam_terms = {
     "wrist_rgb": ObservationTermCfg(
-      func=manipulation_mdp.camera_rgb,
-      params={"sensor_name": "wrist_cam"},
+      func=task_mdp.camera_rgb_aug,
+      params={"sensor_name": "wrist_cam", **aug_params},
+      delay_max_lag=cam_lag,
     ),
     "top_rgb": ObservationTermCfg(
-      func=manipulation_mdp.camera_rgb,
-      params={"sensor_name": "top_cam"},
+      func=task_mdp.camera_rgb_aug,
+      params={"sensor_name": "top_cam", **aug_params},
+      delay_max_lag=cam_lag,
     ),
   }
   cfg.observations["camera"] = ObservationGroupCfg(

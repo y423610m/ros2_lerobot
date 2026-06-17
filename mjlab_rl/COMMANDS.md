@@ -222,9 +222,20 @@ the prior run with no checkpoint copying:
 
 | stage | task id | DR active |
 |---|---|---|
-| 1 NoDR | `…-Rgb-NoDR` | none — vivid-pink block, fixed cameras, ±0.02 starts |
-| 2 SoftDR | `…-Rgb-SoftDR` | block color (pink↔salmon) + table color + lights; cameras fixed, ±0.02 starts |
-| 3 full | `…-Rgb` | + camera jitter, encoder bias, ±0.3 starts |
+| 1 NoDR | `…-Rgb-NoDR` | none — vivid-pink block, fixed cameras, ±0.02 starts, sharp images, instant servos |
+| 2 SoftDR | `…-Rgb-SoftDR` | block color (pink↔salmon) + table color + lights; **camera motion blur + pixel noise + brightness/contrast; camera + proprioception latency**; cameras fixed, ±0.02 starts, instant servos |
+| 3 full | `…-Rgb` | + camera jitter, encoder bias, ±0.3 starts, **servo lag (per-joint low-pass + transport delay)** |
+
+Sim-to-real realism factors (added so the deployed vision policy sees an
+in-distribution input): **image** motion blur (Gaussian blur scaled by joint
+motion) + pixel noise + brightness/contrast, and camera/proprioception
+**observation latency**, enter at SoftDR; **actuator lag** (all joints — a
+per-joint low-pass on the target plus a per-env transport delay, modeling the
+real STS-3215 bandwidth + latency) enters at full. None of these change the
+exported `.jit` contract (`action_scale`/`target_ref`/`max_relative_target`/
+`control_dt`), only pixel content and sim dynamics — so deploy/export are
+unchanged. Tune ranges in `block_picking_vision.py` (`aug_params`, `cam_lag`)
+and `block_picking.py` (`randomize_actuator_lag` `alpha_range`/`lag_range`).
 
 ```bash
 # Phase 1 — learn the grasp, no DR. Watch Episode_Reward/lift climb off ~0.

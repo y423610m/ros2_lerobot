@@ -116,6 +116,9 @@ def make_block_picking_env_cfg(
     "joint_pos": ObservationTermCfg(
       func=mdp_obs.joint_pos_rel,
       noise=Unoise(n_min=-0.01, n_max=0.01),
+      # Proprioception latency (sim2real): the real arm reports Present_Position
+      # with a small lag. 0-1 control steps (0-20 ms) at soft/full, none at none.
+      delay_max_lag=1 if appearance_dr else 0,
     ),
     "joint_vel": ObservationTermCfg(
       func=mdp_obs.joint_vel_rel,
@@ -155,6 +158,10 @@ def make_block_picking_env_cfg(
       # 0.1 rad/step ≈ 5 rad/s, in line with what the real STS-3215 servos
       # can comfortably do; gripper snaps faster.
       max_relative_target=SO101_MAX_RELATIVE_TARGET,
+      # Servo-realism delay-buffer capacity in physics substeps (5 ms each).
+      # Inert (lag 0, low-pass alpha 1) unless randomize_actuator_lag (full DR)
+      # turns it on per-episode, so none/soft behavior is unchanged.
+      max_action_lag=6,
     ),
   }
 
@@ -276,6 +283,19 @@ def make_block_picking_env_cfg(
         "axes": [0, 1, 2],  # RGB only; leave alpha opaque
       },
     ),
+    # Per-episode servo lag for ALL joints: per-joint low-pass (bandwidth) +
+    # per-env transport delay (latency), so the policy is robust to the real
+    # STS-3215 servos lagging the commanded target. Sim-dynamics only — does
+    # not change the exported action contract.
+    "randomize_actuator_lag": EventTermCfg(
+      func=task_mdp.randomize_actuator_lag,
+      mode="reset",
+      params={
+        "action_name": "joint_pos",
+        "alpha_range": (0.5, 1.0),  # per-substep low-pass coef (1.0 = instant)
+        "lag_range": (0, 6),        # transport delay in substeps (0-30 ms)
+      },
+    ),
   }
 
   # Drop DR events not active at this curriculum level. Light randomization is
@@ -285,6 +305,7 @@ def make_block_picking_env_cfg(
     events.pop("randomize_table_color", None)
   if not geometric_dr:  # dr_level in ("none", "soft")
     events.pop("encoder_bias", None)
+    events.pop("randomize_actuator_lag", None)
 
   rewards = {
     "reach": RewardTermCfg(
