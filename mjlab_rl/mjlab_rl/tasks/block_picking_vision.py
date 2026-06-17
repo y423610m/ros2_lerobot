@@ -228,7 +228,7 @@ def make_block_picking_vision_env_cfg(play: bool = False, dr_level: str = "full"
 # ----------------------------------------------------------------------------
 
 
-def make_block_picking_vision_ppo_cfg() -> RslRlOnPolicyRunnerCfg:
+def make_block_picking_vision_ppo_cfg(run_name: str = "") -> RslRlOnPolicyRunnerCfg:
   base = make_block_picking_ppo_cfg()
   return RslRlOnPolicyRunnerCfg(
     actor=RslRlModelCfg(
@@ -268,6 +268,9 @@ def make_block_picking_vision_ppo_cfg() -> RslRlOnPolicyRunnerCfg:
       max_grad_norm=1.0,
     ),
     experiment_name="so101_block_picking_vision",
+    # Appended to the run dir (<timestamp>_<run_name>) to tag the DR level while
+    # keeping one shared experiment_name so curriculum resumes find prior runs.
+    run_name=run_name,
     save_interval=1000,
     num_steps_per_env=base.num_steps_per_env,
     max_iterations=10_000,  # vision needs more iters
@@ -279,30 +282,26 @@ def make_block_picking_vision_ppo_cfg() -> RslRlOnPolicyRunnerCfg:
 # ----------------------------------------------------------------------------
 
 
-register_mjlab_task(
-  task_id="Mjlab-SO101-Block-Picking-Rgb",
-  env_cfg=make_block_picking_vision_env_cfg(),
-  play_env_cfg=make_block_picking_vision_env_cfg(play=True),
-  rl_cfg=make_block_picking_vision_ppo_cfg(),
-  runner_cls=ManipulationOnPolicyRunner,
-)
-
-# Curriculum variants (same experiment_name "so101_block_picking_vision", so each
-# stage's resume finds the prior run). Ramp NoDR -> SoftDR -> full:
-#   NoDR   : no DR, vivid pink, fixed cameras, near-home starts.
-#   SoftDR : block/table color + lights vary; cameras fixed, near-home starts.
-#   (full) : + camera jitter, encoder bias, wide +/-0.3 starts.
-register_mjlab_task(
-  task_id="Mjlab-SO101-Block-Picking-Rgb-NoDR",
-  env_cfg=make_block_picking_vision_env_cfg(dr_level="none"),
-  play_env_cfg=make_block_picking_vision_env_cfg(play=True, dr_level="none"),
-  rl_cfg=make_block_picking_vision_ppo_cfg(),
-  runner_cls=ManipulationOnPolicyRunner,
-)
-register_mjlab_task(
-  task_id="Mjlab-SO101-Block-Picking-Rgb-SoftDR",
-  env_cfg=make_block_picking_vision_env_cfg(dr_level="soft"),
-  play_env_cfg=make_block_picking_vision_env_cfg(play=True, dr_level="soft"),
-  rl_cfg=make_block_picking_vision_ppo_cfg(),
-  runner_cls=ManipulationOnPolicyRunner,
-)
+# Curriculum DR levels (ramp DR0 -> DR1 -> DR2), all sharing one experiment_name
+# ("so101_block_picking_vision") so each stage's resume finds the prior run;
+# run_name tags the run dir (<timestamp>_dr<level>):
+#   DR0 : no DR — vivid pink, fixed cameras, sharp images, instant servos, near-home.
+#   DR1 : appearance DR — block/table color + lights + image motion blur/noise +
+#         camera/proprioception latency; cameras fixed, near-home, instant servos.
+#   DR2 : full — + camera jitter, encoder bias, wide ±0.3 starts, servo lag.
+# The bare ``Mjlab-SO101-Block-Picking-Rgb`` is kept as the default/full (= DR2)
+# task id for standalone tooling (export, deploy, play-zero, render).
+_BLOCK_PICKING_RGB_LEVELS = {
+  "Mjlab-SO101-Block-Picking-Rgb": ("full", "dr2"),
+  "Mjlab-SO101-Block-Picking-Rgb-DR0": ("none", "dr0"),
+  "Mjlab-SO101-Block-Picking-Rgb-DR1": ("soft", "dr1"),
+  "Mjlab-SO101-Block-Picking-Rgb-DR2": ("full", "dr2"),
+}
+for _task_id, (_lvl, _run) in _BLOCK_PICKING_RGB_LEVELS.items():
+  register_mjlab_task(
+    task_id=_task_id,
+    env_cfg=make_block_picking_vision_env_cfg(dr_level=_lvl),
+    play_env_cfg=make_block_picking_vision_env_cfg(play=True, dr_level=_lvl),
+    rl_cfg=make_block_picking_vision_ppo_cfg(run_name=_run),
+    runner_cls=ManipulationOnPolicyRunner,
+  )

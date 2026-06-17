@@ -210,54 +210,59 @@ uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb \
     --agent.logger tensorboard
 ```
 
-### DR curriculum (three phases) — recommended
+### DR curriculum (DR0 → DR1 → DR2) — recommended
 
 Grasping a 2 cm block is a fragile exploration bottleneck. Training with full
 domain randomization from scratch tips the policy into a reach-only optimum and
 it never learns to lift — and turning **all** DR on at once *after* the grasp is
 learned collapses it at the resume boundary just the same (observed: lift
-0.38→0.00, never recovers). So **ramp DR in three stages**, each a task id
+0.38→0.00, never recovers). So **ramp DR in three levels**, each a task id
 sharing `experiment_name` (`so101_block_picking_vision`) so every resume finds
-the prior run with no checkpoint copying:
+the prior run with no checkpoint copying. Each level sets `run_name`, so its run
+dir is tagged `<timestamp>_dr0` / `_dr1` / `_dr2`:
 
-| stage | task id | DR active |
+| level | task id | DR active |
 |---|---|---|
-| 1 NoDR | `…-Rgb-NoDR` | none — vivid-pink block, fixed cameras, ±0.02 starts, sharp images, instant servos |
-| 2 SoftDR | `…-Rgb-SoftDR` | block color (pink↔salmon) + table color + lights; **camera motion blur + pixel noise + brightness/contrast; camera + proprioception latency**; cameras fixed, ±0.02 starts, instant servos |
-| 3 full | `…-Rgb` | + camera jitter, encoder bias, ±0.3 starts, **servo lag (per-joint low-pass + transport delay)** |
+| DR0 | `…-Rgb-DR0` | none — vivid-pink block, fixed cameras, ±0.02 arm starts, sharp images, instant servos |
+| DR1 | `…-Rgb-DR1` | block color (pink↔salmon) + table color + lights; **camera motion blur + pixel noise + brightness/contrast; camera + proprioception latency**; cameras fixed, ±0.02 arm starts, instant servos |
+| DR2 | `…-Rgb-DR2` (= bare `…-Rgb`) | + camera jitter, encoder bias, ±0.3 arm starts, **servo lag (per-joint low-pass + transport delay)** |
 
-Sim-to-real realism factors (added so the deployed vision policy sees an
-in-distribution input): **image** motion blur (Gaussian blur scaled by joint
-motion) + pixel noise + brightness/contrast, and camera/proprioception
-**observation latency**, enter at SoftDR; **actuator lag** (all joints — a
-per-joint low-pass on the target plus a per-env transport delay, modeling the
-real STS-3215 bandwidth + latency) enters at full. None of these change the
-exported `.jit` contract (`action_scale`/`target_ref`/`max_relative_target`/
-`control_dt`), only pixel content and sim dynamics — so deploy/export are
-unchanged. Tune ranges in `block_picking_vision.py` (`aug_params`, `cam_lag`)
-and `block_picking.py` (`randomize_actuator_lag` `alpha_range`/`lag_range`).
+Always-on start randomization (every level, including DR0): block & container XY
+(block x∈[-0.55,-0.30], y∈[-0.045,0.195]; container x∈[-0.45,-0.30],
+y∈[-0.245,-0.005]) with a **p=0.5 block↔container swap**, and the **gripper start
+opening across its full range** (closed↔open).
+
+Sim-to-real realism factors (so the deployed vision policy sees an in-distribution
+input): **image** motion blur (Gaussian blur scaled by joint motion) + pixel
+noise + brightness/contrast, and camera/proprioception **observation latency**,
+enter at DR1; **actuator lag** (all joints — per-joint low-pass on the target +
+per-env transport delay, modeling the real STS-3215 bandwidth + latency) enters
+at DR2. None of these change the exported `.jit` contract (`action_scale`/
+`target_ref`/`max_relative_target`/`control_dt`), only pixel content and sim
+dynamics — so deploy/export are unchanged. Tune ranges in `block_picking_vision.py`
+(`aug_params`, `cam_lag`), `block_picking.py` (`randomize_actuator_lag`
+`alpha_range`/`lag_range`, `BLOCK_XY_RANGE`/`CONTAINER_XY_RANGE`, swap `p`).
 
 ```bash
-# Phase 1 — learn the grasp, no DR. Watch Episode_Reward/lift climb off ~0.
-pixi run train-mjlab-vision-nodr                                  # ~8000 iters
+# DR0 — learn the grasp, no DR. Watch Episode_Reward/lift climb off ~0.
+pixi run train-mjlab-vision-dr0                                   # ~8000 iters → run dir ..._dr0
 
-# Phase 2 — adapt to appearance (block/table color, lights) WITHOUT touching
-# grasp geometry. Resume the phase-1 run; lift should dip then recover.
-RUN=<phase1_ts> CKPT=model_8000.pt pixi run train-mjlab-vision-softdr-resume
+# DR1 — adapt to appearance + image realism WITHOUT touching grasp geometry.
+# Resume the DR0 run; lift should dip then recover.
+RUN=<dr0_run> CKPT=model_8000.pt pixi run train-mjlab-vision-dr1-resume
 
-# Phase 3 — add the geometric DR (camera jitter, encoder bias, wide starts).
-# This task bakes in anti-collapse PPO hyperparameters (lower LR, smaller KL
-# step, more entropy, tighter grad clip) — full DR is high-variance and tends to
-# trigger a sudden, late, irreversible policy collapse otherwise. Resume from a
-# KNOWN-GOOD (pre-collapse) phase-2 checkpoint. Override via env vars if needed:
-# LR=1e-4 KL=0.005 ENT=0.03 GN=0.5 RUN=... CKPT=... pixi run train-mjlab-vision-resume
-RUN=<phase2_ts> CKPT=model_16000.pt pixi run train-mjlab-vision-resume
+# DR2 — add the geometric DR + servo lag. This task bakes in anti-collapse PPO
+# hyperparameters (lower LR, smaller KL step, more entropy, tighter grad clip) —
+# full DR is high-variance and tends to trigger a sudden, late, irreversible
+# policy collapse otherwise. Resume a KNOWN-GOOD (pre-collapse) DR1 run. Override:
+# LR=1e-4 KL=0.005 ENT=0.03 GN=0.5 RUN=... CKPT=... pixi run train-mjlab-vision-dr2-resume
+RUN=<dr1_run> CKPT=model_16000.pt pixi run train-mjlab-vision-dr2-resume
 ```
 
 At each resume watch `Episode_Reward/lift`/`success`. Two distinct failure modes:
 
 - **Drops to ~0 immediately at the boundary and re-climbs only `reach`** → that
-  stage's *shock* is too large; shrink its ranges (block-color span, start range)
+  level's *shock* is too large; shrink its ranges (block-color span, start range)
   before going on.
 - **Holds a healthy plateau for thousands of iters then collapses to ~0 in
   ~50 iters and never recovers** → that's a destructive PPO update, not a DR
@@ -266,9 +271,10 @@ At each resume watch `Episode_Reward/lift`/`success`. Two distinct failure modes
   full-DR ranges (e.g. start `±0.2`, smaller camera jitter) also cuts the return
   variance that triggers it.
 
-> The plain `Mjlab-SO101-Block-Picking-Rgb` task (and state-only
-> `Mjlab-SO101-Block-Picking`) is full-DR by default — use it directly if you
-> aren't running the curriculum. Each has matching `-NoDR` and `-SoftDR` variants.
+> The bare `Mjlab-SO101-Block-Picking-Rgb` (and state-only
+> `Mjlab-SO101-Block-Picking`) is the full-DR (= DR2) task, kept as the default
+> id for standalone tooling (export, deploy, play-zero, render). Each family also
+> has explicit `-DR0` / `-DR1` / `-DR2` ids.
 
 ### Replay a trained vision policy
 

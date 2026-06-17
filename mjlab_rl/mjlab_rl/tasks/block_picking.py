@@ -85,14 +85,14 @@ from mjlab_rl.envs.actions import RateLimitedJointPositionActionCfg
 # The whole region sits within the SO-101's ~0.35 m reach from base
 # (-0.4, 0.25, 0.825), with the arm pointing in world -y.
 BLOCK_XY_RANGE = {
-  "x": (-0.10, 0.10),    # default x = -0.40 → [-0.50, -0.30]
-  "y": (-0.075, 0.075),  # default y = 0.075 → [0.00, 0.15]
+  "x": (-0.15, 0.10),    # default x = -0.40 → [-0.55, -0.30]
+  "y": (-0.12, 0.12),    # default y = 0.075 → [-0.045, 0.195]
   "yaw": (-math.pi, math.pi),  # full random yaw — block is 4.5×2×2 cm
                                 # so the policy must learn any orientation
 }
 CONTAINER_XY_RANGE = {
   "x": (-0.075, 0.075),  # default x = -0.375 → [-0.45, -0.30]
-  "y": (-0.075, 0.075),  # default y = -0.125 → [-0.20, -0.05]
+  "y": (-0.12, 0.12),    # default y = -0.125 → [-0.245, -0.005]
 }
 
 
@@ -207,6 +207,20 @@ def make_block_picking_env_cfg(
         "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
       },
     ),
+    # Randomize the gripper's starting opening across its FULL range (fully
+    # closed ↔ fully open) every episode, so the policy is robust to whatever
+    # state the real gripper happens to start in. Offset is from the home value
+    # (0.0), so this range is absolute; clamped to the joint's soft limits. Runs
+    # after reset_robot_joints (which also nudges the gripper) and overrides it.
+    "reset_gripper_home": EventTermCfg(
+      func=mdp_events.reset_joints_by_offset,
+      mode="reset",
+      params={
+        "position_range": (-0.17, 1.745),  # gripper joint range, closed→open
+        "velocity_range": (0.0, 0.0),
+        "asset_cfg": SceneEntityCfg("robot", joint_names=("gripper",)),
+      },
+    ),
     # Per-episode joint encoder calibration offset. This bias is *unobservable*
     # to the policy (the action target is shifted by it via
     # RateLimitedJointPositionAction), so training forces robustness to the real
@@ -238,8 +252,15 @@ def make_block_picking_env_cfg(
         "asset_cfg": SceneEntityCfg("container"),
       },
     ),
-    # Must run AFTER reset_container_pose so the snapshot captures the
-    # randomized position, not the un-randomized default.
+    # With p=0.5, swap the block↔container XY so the task layout isn't always
+    # "block on +y, container on -y". After both placements, before the snapshot.
+    "swap_block_container": EventTermCfg(
+      func=task_mdp.swap_block_container_xy,
+      mode="reset",
+      params={"p": 0.5, "block_name": "block", "container_name": "container"},
+    ),
+    # Must run AFTER reset_container_pose (and the swap) so the snapshot captures
+    # the final randomized position, not the un-randomized default.
     "snapshot_container_xy": EventTermCfg(
       func=task_mdp.snapshot_container_xy,
       mode="reset",
@@ -549,7 +570,7 @@ def make_block_picking_env_cfg(
 # ----------------------------------------------------------------------------
 
 
-def make_block_picking_ppo_cfg() -> RslRlOnPolicyRunnerCfg:
+def make_block_picking_ppo_cfg(run_name: str = "") -> RslRlOnPolicyRunnerCfg:
   return RslRlOnPolicyRunnerCfg(
     actor=RslRlModelCfg(
       hidden_dims=(256, 256, 128),
@@ -581,6 +602,10 @@ def make_block_picking_ppo_cfg() -> RslRlOnPolicyRunnerCfg:
       max_grad_norm=1.0,
     ),
     experiment_name="so101_block_picking",
+    # run_name is appended to the timestamped run dir (<timestamp>_<run_name>),
+    # labeling each run by its DR level while sharing one experiment_name so
+    # curriculum resumes still find the prior stage's run.
+    run_name=run_name,
     save_interval=1000,
     num_steps_per_env=24,
     max_iterations=5_000,
@@ -592,28 +617,22 @@ def make_block_picking_ppo_cfg() -> RslRlOnPolicyRunnerCfg:
 # ----------------------------------------------------------------------------
 
 
-register_mjlab_task(
-  task_id="Mjlab-SO101-Block-Picking",
-  env_cfg=make_block_picking_env_cfg(),
-  play_env_cfg=make_block_picking_env_cfg(play=True),
-  rl_cfg=make_block_picking_ppo_cfg(),
-  runner_cls=ManipulationOnPolicyRunner,
-)
-
-# Curriculum variants (same experiment_name, so each stage's resume finds the
-# prior run): NoDR = no DR; SoftDR = appearance DR only (color/lights, near-home
-# geometry). Ramp NoDR -> SoftDR -> full.
-register_mjlab_task(
-  task_id="Mjlab-SO101-Block-Picking-NoDR",
-  env_cfg=make_block_picking_env_cfg(dr_level="none"),
-  play_env_cfg=make_block_picking_env_cfg(play=True, dr_level="none"),
-  rl_cfg=make_block_picking_ppo_cfg(),
-  runner_cls=ManipulationOnPolicyRunner,
-)
-register_mjlab_task(
-  task_id="Mjlab-SO101-Block-Picking-SoftDR",
-  env_cfg=make_block_picking_env_cfg(dr_level="soft"),
-  play_env_cfg=make_block_picking_env_cfg(play=True, dr_level="soft"),
-  rl_cfg=make_block_picking_ppo_cfg(),
-  runner_cls=ManipulationOnPolicyRunner,
-)
+# Curriculum DR levels (ramp DR0 -> DR1 -> DR2): DR0 = no DR; DR1 = appearance DR
+# only (color/lights/image realism, near-home geometry); DR2 = full DR. All share
+# one experiment_name so each stage's resume finds the prior run; run_name tags
+# the run dir (<timestamp>_dr<level>). The bare ``Mjlab-SO101-Block-Picking`` is
+# kept as the default/full (= DR2) task id for standalone tooling.
+_BLOCK_PICKING_LEVELS = {
+  "Mjlab-SO101-Block-Picking": ("full", "dr2"),
+  "Mjlab-SO101-Block-Picking-DR0": ("none", "dr0"),
+  "Mjlab-SO101-Block-Picking-DR1": ("soft", "dr1"),
+  "Mjlab-SO101-Block-Picking-DR2": ("full", "dr2"),
+}
+for _task_id, (_lvl, _run) in _BLOCK_PICKING_LEVELS.items():
+  register_mjlab_task(
+    task_id=_task_id,
+    env_cfg=make_block_picking_env_cfg(dr_level=_lvl),
+    play_env_cfg=make_block_picking_env_cfg(play=True, dr_level=_lvl),
+    rl_cfg=make_block_picking_ppo_cfg(run_name=_run),
+    runner_cls=ManipulationOnPolicyRunner,
+  )

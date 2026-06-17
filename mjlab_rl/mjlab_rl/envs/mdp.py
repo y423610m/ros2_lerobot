@@ -486,6 +486,45 @@ _container_init_xy: dict[int, torch.Tensor] = {}
 _container_init_quat: dict[int, torch.Tensor] = {}
 
 
+def swap_block_container_xy(
+  env: "ManagerBasedRlEnv",
+  env_ids: torch.Tensor | None,
+  p: float = 0.5,
+  block_name: str = "block",
+  container_name: str = "container",
+) -> None:
+  """Reset-mode event: with probability ``p`` per env, swap the block's and
+  container's XY positions (each keeps its own Z and orientation).
+
+  The block normally spawns on the +y side of the workspace and the container on
+  the -y side; swapping puts them on either side so the policy can't assume a
+  fixed "container is toward -y" layout. Must be ordered AFTER reset_block_pose /
+  reset_container_pose and BEFORE snapshot_container_xy (the snapshot must record
+  the post-swap container XY).
+  """
+  env.sim.forward()  # refresh root caches against the freshly-written reset state
+
+  if env_ids is None:
+    env_ids = torch.arange(env.num_envs, device=env.device)
+  env_ids = env_ids.to(env.device)
+
+  block: Entity = env.scene[block_name]
+  container: Entity = env.scene[container_name]
+
+  b_pos = block.data.root_link_pos_w[env_ids].clone()
+  b_quat = block.data.root_link_quat_w[env_ids].clone()
+  c_pos = container.data.root_link_pos_w[env_ids].clone()
+  c_quat = container.data.root_link_quat_w[env_ids].clone()
+
+  sel = torch.rand(env_ids.shape[0], device=env.device) < p
+  nb_pos, nc_pos = b_pos.clone(), c_pos.clone()
+  nb_pos[sel, :2] = c_pos[sel, :2]  # block takes container's XY
+  nc_pos[sel, :2] = b_pos[sel, :2]  # container takes block's XY
+
+  block.write_root_link_pose_to_sim(torch.cat([nb_pos, b_quat], dim=-1), env_ids)
+  container.write_root_link_pose_to_sim(torch.cat([nc_pos, c_quat], dim=-1), env_ids)
+
+
 def snapshot_container_xy(
   env: "ManagerBasedRlEnv",
   env_ids: torch.Tensor | None,
