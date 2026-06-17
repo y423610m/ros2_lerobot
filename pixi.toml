@@ -59,8 +59,13 @@ train-mjlab-vision-nodr = "cd $PIXI_PROJECT_ROOT/mjlab_rl && bash -c 'uv run pyt
 train-mjlab-vision-softdr-resume = "cd $PIXI_PROJECT_ROOT/mjlab_rl && bash -c 'uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb-SoftDR --env.scene.num-envs ${NENV:-1024} --agent.max-iterations ${ITER:-16000} --agent.logger tensorboard --agent.resume True --agent.load-run ${RUN:-.*} --agent.load-checkpoint ${CKPT:-model_.*.pt}'"
 # DR curriculum phase 3: resume the phase-2 (SoftDR) run under FULL DR (adds
 # camera jitter, encoder bias, wide ±0.3 starts). Same experiment_name, so it
-# finds the prior checkpoint. Set RUN/CKPT to the phase-2 run.
-train-mjlab-vision-resume = "cd $PIXI_PROJECT_ROOT/mjlab_rl && bash -c 'uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb --env.scene.num-envs ${NENV:-1024} --agent.max-iterations ${ITER:-24000} --agent.logger tensorboard --agent.resume True --agent.load-run ${RUN:-.*} --agent.load-checkpoint ${CKPT:-model_.*.pt}'"
+# finds the prior checkpoint. Set RUN/CKPT to the phase-2 run (use a KNOWN-GOOD,
+# pre-collapse checkpoint).
+# Anti-collapse hyperparameters (full DR is high-variance and the late, sudden
+# policy collapse is a destructive PPO update): lower LR, smaller per-iteration
+# KL step, more entropy so the action std doesn't decay to brittle-deterministic,
+# tighter grad clip. Phases 1-2 keep the faster default cfg.
+train-mjlab-vision-resume = "cd $PIXI_PROJECT_ROOT/mjlab_rl && bash -c 'uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb --env.scene.num-envs ${NENV:-1024} --agent.max-iterations ${ITER:-24000} --agent.logger tensorboard --agent.resume True --agent.load-run ${RUN:-.*} --agent.load-checkpoint ${CKPT:-model_.*.pt} --agent.algorithm.learning-rate ${LR:-2e-4} --agent.algorithm.desired-kl ${KL:-0.006} --agent.algorithm.entropy-coef ${ENT:-0.02} --agent.algorithm.max-grad-norm ${GN:-0.5}'"
 # Replay the vision policy in viser. This uses the DR-ON task, so reset events
 # (camera jitter, encoder bias, wide starts, salmon block + color noise) still
 # fire in play mode — useful to see the policy under deployment-like variation.

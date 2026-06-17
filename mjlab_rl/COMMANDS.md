@@ -235,12 +235,25 @@ pixi run train-mjlab-vision-nodr                                  # ~8000 iters
 RUN=<phase1_ts> CKPT=model_8000.pt pixi run train-mjlab-vision-softdr-resume
 
 # Phase 3 — add the geometric DR (camera jitter, encoder bias, wide starts).
+# This task bakes in anti-collapse PPO hyperparameters (lower LR, smaller KL
+# step, more entropy, tighter grad clip) — full DR is high-variance and tends to
+# trigger a sudden, late, irreversible policy collapse otherwise. Resume from a
+# KNOWN-GOOD (pre-collapse) phase-2 checkpoint. Override via env vars if needed:
+# LR=1e-4 KL=0.005 ENT=0.03 GN=0.5 RUN=... CKPT=... pixi run train-mjlab-vision-resume
 RUN=<phase2_ts> CKPT=model_16000.pt pixi run train-mjlab-vision-resume
 ```
 
-At each resume watch `Episode_Reward/lift`/`success`: a transient dip is fine,
-but if it goes to ~0 and stays there, that stage's shock is still too large —
-shrink that stage's ranges (e.g. block-color span, start range) before going on.
+At each resume watch `Episode_Reward/lift`/`success`. Two distinct failure modes:
+
+- **Drops to ~0 immediately at the boundary and re-climbs only `reach`** → that
+  stage's *shock* is too large; shrink its ranges (block-color span, start range)
+  before going on.
+- **Holds a healthy plateau for thousands of iters then collapses to ~0 in
+  ~50 iters and never recovers** → that's a destructive PPO update, not a DR
+  shock. Lower the LR / KL further (`LR=1e-4 KL=0.005`), raise entropy
+  (`ENT=0.03`), and resume from the last pre-collapse checkpoint. Narrowing the
+  full-DR ranges (e.g. start `±0.2`, smaller camera jitter) also cuts the return
+  variance that triggers it.
 
 > The plain `Mjlab-SO101-Block-Picking-Rgb` task (and state-only
 > `Mjlab-SO101-Block-Picking`) is full-DR by default — use it directly if you
