@@ -221,12 +221,28 @@ step**, each a task id sharing `experiment_name` (`so101_block_picking_vision`)
 so every resume finds the prior run with no checkpoint copying. Each level sets
 `run_name`, so its run dir is tagged `<timestamp>_dr0…_dr3`:
 
+Cumulative — each level is a superset of the previous:
+
 | level | task id | adds (on top of previous) |
 |---|---|---|
 | DR0 | `…-Rgb-DR0` | nothing — vivid-pink block, sharp images, fixed cameras, ±0.02 arm start, instant servos |
 | DR1 | `…-Rgb-DR1` | block color (pink↔salmon) + table-color noise |
 | DR2 | `…-Rgb-DR2` | **image motion blur + pixel noise + brightness/contrast + camera & proprioception latency** (cameras geometrically fixed) |
 | DR3 | `…-Rgb-DR3` (= bare `…-Rgb`) | camera-pose jitter + encoder bias + ±0.3 arm start + **servo lag (per-joint low-pass + transport delay)** |
+
+Per-factor matrix (✓ = active at that level):
+
+| factor | DR0 | DR1 | DR2 | DR3 |
+|---|:--:|:--:|:--:|:--:|
+| block/table color | ✗ | ✓ | ✓ | ✓ |
+| image blur + pixel noise + brightness/contrast | ✗ | ✗ | ✓ | ✓ |
+| camera + proprioception obs latency | ✗ | ✗ | ✓ | ✓ |
+| camera-pose (extrinsics) jitter | ✗ | ✗ | ✗ | ✓ |
+| encoder bias | ✗ | ✗ | ✗ | ✓ |
+| servo lag (per-joint low-pass + transport delay) | ✗ | ✗ | ✗ | ✓ |
+| arm start range | ±0.02 | ±0.02 | ±0.02 | ±0.3 |
+| anti-collapse PPO hyperparams (resume task) | — | ✗ | ✗ | ✓ |
+| run-dir tag (`run_name`) | `_dr0` | `_dr1` | `_dr2` | `_dr3` |
 
 Always-on start randomization (every level, including DR0): block & container XY
 (block x∈[-0.55,-0.30], y∈[-0.045,0.195]; container x∈[-0.45,-0.30],
