@@ -39,6 +39,7 @@ from mjlab.tasks.registry import register_mjlab_task
 
 from mjlab_rl.envs import mdp as task_mdp
 from mjlab_rl.tasks.block_picking import (
+  DR_ORDER,
   make_block_picking_env_cfg,
   make_block_picking_ppo_cfg,
 )
@@ -66,7 +67,8 @@ _CNN_CLASS = "mjlab.rl.spatial_softmax:SpatialSoftmaxCNNModel"
 # ----------------------------------------------------------------------------
 
 
-def make_block_picking_vision_env_cfg(play: bool = False, dr_level: str = "full"):
+def make_block_picking_vision_env_cfg(play: bool = False, dr_level: str = "dr3"):
+  order = DR_ORDER[dr_level]
   cfg = make_block_picking_env_cfg(play=play, dr_level=dr_level)
 
   # --- Cameras ----------------------------------------------------------
@@ -167,10 +169,10 @@ def make_block_picking_vision_env_cfg(play: bool = False, dr_level: str = "full"
     },
   )
 
-  # Camera-extrinsics jitter is geometric DR -> full level only. At none/soft the
-  # policy learns/keeps the grasp against fixed cameras (soft still varies the
-  # block/table appearance, just not the camera pose).
-  if dr_level != "full":
+  # Camera-extrinsics jitter is geometric DR -> dr3 only. Below dr3 the policy
+  # learns/keeps the grasp against fixed cameras (dr1 varies block/table color,
+  # dr2 the image realism, but neither moves the camera pose).
+  if order < 3:
     for _k in ("wrist_cam_pos", "wrist_cam_quat", "top_cam_pos", "top_cam_quat"):
       cfg.events.pop(_k, None)
 
@@ -193,7 +195,7 @@ def make_block_picking_vision_env_cfg(play: bool = False, dr_level: str = "full"
   # brightness/contrast via camera_rgb_aug, and camera latency via the obs
   # term's built-in delay buffer. At none the aug params are 0 (identity wrapper
   # of camera_rgb) and there is no delay, matching the sharp clean sim image.
-  img_aug = dr_level in ("soft", "full")
+  img_aug = order >= 2
   aug_params = dict(
     blur_strength=2.0 if img_aug else 0.0,  # max Gaussian sigma (px) at full motion
     noise_std=0.02 if img_aug else 0.0,
@@ -282,26 +284,27 @@ def make_block_picking_vision_ppo_cfg(run_name: str = "") -> RslRlOnPolicyRunner
 # ----------------------------------------------------------------------------
 
 
-# Curriculum DR levels (ramp DR0 -> DR1 -> DR2), all sharing one experiment_name
-# ("so101_block_picking_vision") so each stage's resume finds the prior run;
-# run_name tags the run dir (<timestamp>_dr<level>):
+# 4-level curriculum, all sharing one experiment_name ("so101_block_picking_vision")
+# so each stage's resume finds the prior run; run_name tags the run dir
+# (<timestamp>_dr<level>):
 #   DR0 : no DR — vivid pink, fixed cameras, sharp images, instant servos, near-home.
-#   DR1 : appearance DR — block/table color + lights + image motion blur/noise +
-#         camera/proprioception latency; cameras fixed, near-home, instant servos.
-#   DR2 : full — + camera jitter, encoder bias, wide ±0.3 starts, servo lag.
-# The bare ``Mjlab-SO101-Block-Picking-Rgb`` is kept as the default/full (= DR2)
+#   DR1 : + block/table color (lights are always on).
+#   DR2 : + image motion blur/noise/brightness + camera/proprioception latency.
+#   DR3 : full — + camera-pose jitter, encoder bias, wide ±0.3 starts, servo lag.
+# The bare ``Mjlab-SO101-Block-Picking-Rgb`` is kept as the default/full (= DR3)
 # task id for standalone tooling (export, deploy, play-zero, render).
 _BLOCK_PICKING_RGB_LEVELS = {
-  "Mjlab-SO101-Block-Picking-Rgb": ("full", "dr2"),
-  "Mjlab-SO101-Block-Picking-Rgb-DR0": ("none", "dr0"),
-  "Mjlab-SO101-Block-Picking-Rgb-DR1": ("soft", "dr1"),
-  "Mjlab-SO101-Block-Picking-Rgb-DR2": ("full", "dr2"),
+  "Mjlab-SO101-Block-Picking-Rgb": "dr3",
+  "Mjlab-SO101-Block-Picking-Rgb-DR0": "dr0",
+  "Mjlab-SO101-Block-Picking-Rgb-DR1": "dr1",
+  "Mjlab-SO101-Block-Picking-Rgb-DR2": "dr2",
+  "Mjlab-SO101-Block-Picking-Rgb-DR3": "dr3",
 }
-for _task_id, (_lvl, _run) in _BLOCK_PICKING_RGB_LEVELS.items():
+for _task_id, _lvl in _BLOCK_PICKING_RGB_LEVELS.items():
   register_mjlab_task(
     task_id=_task_id,
     env_cfg=make_block_picking_vision_env_cfg(dr_level=_lvl),
     play_env_cfg=make_block_picking_vision_env_cfg(play=True, dr_level=_lvl),
-    rl_cfg=make_block_picking_vision_ppo_cfg(run_name=_run),
+    rl_cfg=make_block_picking_vision_ppo_cfg(run_name=_lvl),
     runner_cls=ManipulationOnPolicyRunner,
   )

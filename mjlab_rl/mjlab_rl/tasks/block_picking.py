@@ -101,14 +101,22 @@ CONTAINER_XY_RANGE = {
 # ----------------------------------------------------------------------------
 
 
+DR_ORDER = {"dr0": 0, "dr1": 1, "dr2": 2, "dr3": 3}
+
+
 def make_block_picking_env_cfg(
-  play: bool = False, dr_level: str = "full"
+  play: bool = False, dr_level: str = "dr3"
 ) -> ManagerBasedRlEnvCfg:
-  assert dr_level in ("none", "soft", "full"), dr_level
-  # Appearance DR (block/table color) is on for soft and full; geometric DR
-  # (wide starts, encoder bias, camera jitter) is full-only.
-  appearance_dr = dr_level in ("soft", "full")
-  geometric_dr = dr_level == "full"
+  assert dr_level in DR_ORDER, dr_level
+  order = DR_ORDER[dr_level]
+  # 4-level curriculum, each level a superset of the previous:
+  #   color_dr (dr1+)     : block/table color.
+  #   image_dr (dr2+)     : image motion blur/noise/brightness + obs latency.
+  #   geometric_dr (dr3)  : wide arm starts, encoder bias, camera-pose jitter,
+  #                         servo lag.
+  color_dr = order >= 1
+  image_dr = order >= 2
+  geometric_dr = order >= 3
 
   robot_cfg = SceneEntityCfg("robot", site_names=("gripperframe",))
 
@@ -117,8 +125,8 @@ def make_block_picking_env_cfg(
       func=mdp_obs.joint_pos_rel,
       noise=Unoise(n_min=-0.01, n_max=0.01),
       # Proprioception latency (sim2real): the real arm reports Present_Position
-      # with a small lag. 0-1 control steps (0-20 ms) at soft/full, none at none.
-      delay_max_lag=1 if appearance_dr else 0,
+      # with a small lag. 0-1 control steps (0-20 ms) at dr2+, none below.
+      delay_max_lag=1 if image_dr else 0,
     ),
     "joint_vel": ObservationTermCfg(
       func=mdp_obs.joint_vel_rel,
@@ -321,10 +329,10 @@ def make_block_picking_env_cfg(
 
   # Drop DR events not active at this curriculum level. Light randomization is
   # cosmetic and left on at all levels. The wide-start range is gated above.
-  if not appearance_dr:  # dr_level == "none"
+  if not color_dr:  # dr0
     events.pop("randomize_block_color", None)
     events.pop("randomize_table_color", None)
-  if not geometric_dr:  # dr_level in ("none", "soft")
+  if not geometric_dr:  # dr0, dr1, dr2
     events.pop("encoder_bias", None)
     events.pop("randomize_actuator_lag", None)
 
@@ -617,22 +625,24 @@ def make_block_picking_ppo_cfg(run_name: str = "") -> RslRlOnPolicyRunnerCfg:
 # ----------------------------------------------------------------------------
 
 
-# Curriculum DR levels (ramp DR0 -> DR1 -> DR2): DR0 = no DR; DR1 = appearance DR
-# only (color/lights/image realism, near-home geometry); DR2 = full DR. All share
-# one experiment_name so each stage's resume finds the prior run; run_name tags
-# the run dir (<timestamp>_dr<level>). The bare ``Mjlab-SO101-Block-Picking`` is
-# kept as the default/full (= DR2) task id for standalone tooling.
+# 4-level curriculum (ramp DR0 -> DR1 -> DR2 -> DR3): DR0 = no DR; DR1 += block/
+# table color; DR2 += image realism + obs latency; DR3 = full (camera-pose jitter,
+# encoder bias, wide starts, servo lag). All share one experiment_name so each
+# stage's resume finds the prior run; run_name tags the run dir
+# (<timestamp>_dr<level>). The bare ``Mjlab-SO101-Block-Picking`` is kept as the
+# default/full (= DR3) task id for standalone tooling.
 _BLOCK_PICKING_LEVELS = {
-  "Mjlab-SO101-Block-Picking": ("full", "dr2"),
-  "Mjlab-SO101-Block-Picking-DR0": ("none", "dr0"),
-  "Mjlab-SO101-Block-Picking-DR1": ("soft", "dr1"),
-  "Mjlab-SO101-Block-Picking-DR2": ("full", "dr2"),
+  "Mjlab-SO101-Block-Picking": "dr3",
+  "Mjlab-SO101-Block-Picking-DR0": "dr0",
+  "Mjlab-SO101-Block-Picking-DR1": "dr1",
+  "Mjlab-SO101-Block-Picking-DR2": "dr2",
+  "Mjlab-SO101-Block-Picking-DR3": "dr3",
 }
-for _task_id, (_lvl, _run) in _BLOCK_PICKING_LEVELS.items():
+for _task_id, _lvl in _BLOCK_PICKING_LEVELS.items():
   register_mjlab_task(
     task_id=_task_id,
     env_cfg=make_block_picking_env_cfg(dr_level=_lvl),
     play_env_cfg=make_block_picking_env_cfg(play=True, dr_level=_lvl),
-    rl_cfg=make_block_picking_ppo_cfg(run_name=_run),
+    rl_cfg=make_block_picking_ppo_cfg(run_name=_lvl),
     runner_cls=ManipulationOnPolicyRunner,
   )
