@@ -221,26 +221,29 @@ step**, each a task id sharing `experiment_name` (`so101_block_picking_vision`)
 so every resume finds the prior run with no checkpoint copying. Each level sets
 `run_name`, so its run dir is tagged `<timestamp>_dr0…_dr3`:
 
-Cumulative — each level is a superset of the previous:
+Only **visual** DR is ramped (vision-based grasping is the fragile part); the
+**non-visual** DR (servo lag, encoder bias, wide ±0.3 arm starts) is on from DR0
+since it doesn't corrupt the camera image. Cumulative — each level is a superset
+of the previous:
 
 | level | task id | adds (on top of previous) |
 |---|---|---|
-| DR0 | `…-Rgb-DR0` | nothing — vivid-pink block, sharp images, fixed cameras, ±0.02 arm start, instant servos |
+| DR0 | `…-Rgb-DR0` | **servo lag + encoder bias + wide ±0.3 arm starts** (non-visual); vivid-pink block, sharp images, fixed cameras |
 | DR1 | `…-Rgb-DR1` | block color (pink↔salmon) + table-color noise |
 | DR2 | `…-Rgb-DR2` | **image motion blur + pixel noise + brightness/contrast + camera & proprioception latency** (cameras geometrically fixed) |
-| DR3 | `…-Rgb-DR3` (= bare `…-Rgb`) | camera-pose jitter + encoder bias + ±0.3 arm start + **servo lag (per-joint low-pass + transport delay)** |
+| DR3 | `…-Rgb-DR3` (= bare `…-Rgb`) | **camera-pose (extrinsics) jitter** |
 
 Per-factor matrix (✓ = active at that level):
 
 | factor | DR0 | DR1 | DR2 | DR3 |
 |---|:--:|:--:|:--:|:--:|
+| servo lag (per-joint low-pass + transport delay) | ✓ | ✓ | ✓ | ✓ |
+| encoder bias | ✓ | ✓ | ✓ | ✓ |
+| wide arm start range (±0.3) | ✓ | ✓ | ✓ | ✓ |
 | block/table color | ✗ | ✓ | ✓ | ✓ |
 | image blur + pixel noise + brightness/contrast | ✗ | ✗ | ✓ | ✓ |
 | camera + proprioception obs latency | ✗ | ✗ | ✓ | ✓ |
 | camera-pose (extrinsics) jitter | ✗ | ✗ | ✗ | ✓ |
-| encoder bias | ✗ | ✗ | ✗ | ✓ |
-| servo lag (per-joint low-pass + transport delay) | ✗ | ✗ | ✗ | ✓ |
-| arm start range | ±0.02 | ±0.02 | ±0.02 | ±0.3 |
 | anti-collapse PPO hyperparams (resume task) | — | ✗ | ✗ | ✓ |
 | run-dir tag (`run_name`) | `_dr0` | `_dr1` | `_dr2` | `_dr3` |
 

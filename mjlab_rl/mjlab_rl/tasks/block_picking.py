@@ -109,14 +109,17 @@ def make_block_picking_env_cfg(
 ) -> ManagerBasedRlEnvCfg:
   assert dr_level in DR_ORDER, dr_level
   order = DR_ORDER[dr_level]
-  # 4-level curriculum, each level a superset of the previous:
+  # 4-level curriculum. Only the *visual* DR is ramped, since vision-based grasp
+  # exploration is the fragile part:
   #   color_dr (dr1+)     : block/table color.
   #   image_dr (dr2+)     : image motion blur/noise/brightness + obs latency.
-  #   geometric_dr (dr3)  : wide arm starts, encoder bias, camera-pose jitter,
-  #                         servo lag.
+  #   camera-pose jitter  : dr3 (gated in block_picking_vision.py).
+  # The *non-visual* DR (servo lag, encoder bias, wide ±0.3 arm starts) is ON at
+  # ALL levels including dr0 — it doesn't corrupt the camera image, so it doesn't
+  # tip the policy into the reach-only optimum during early grasp learning, and
+  # the policy learns to grasp robust to it from the start.
   color_dr = order >= 1
   image_dr = order >= 2
-  geometric_dr = order >= 3
 
   robot_cfg = SceneEntityCfg("robot", site_names=("gripperframe",))
 
@@ -208,9 +211,9 @@ def make_block_picking_env_cfg(
       func=mdp_events.reset_joints_by_offset,
       mode="reset",
       params={
-        # Wide ±0.3 only at full DR; near-home ±0.02 for none/soft so the grasp
-        # geometry is unchanged until the policy is robust to appearance first.
-        "position_range": (-0.3, 0.3) if geometric_dr else (-0.02, 0.02),
+        # Wide ±0.3 at all levels (non-visual): the policy learns to grasp from
+        # varied start configs from dr0; it doesn't disturb vision exploration.
+        "position_range": (-0.3, 0.3),
         "velocity_range": (0.0, 0.0),
         "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
       },
@@ -332,9 +335,8 @@ def make_block_picking_env_cfg(
   if not color_dr:  # dr0
     events.pop("randomize_block_color", None)
     events.pop("randomize_table_color", None)
-  if not geometric_dr:  # dr0, dr1, dr2
-    events.pop("encoder_bias", None)
-    events.pop("randomize_actuator_lag", None)
+  # encoder_bias and randomize_actuator_lag are non-visual -> kept at every level
+  # (incl. dr0), alongside the wide arm-start range above.
 
   rewards = {
     "reach": RewardTermCfg(
@@ -625,12 +627,15 @@ def make_block_picking_ppo_cfg(run_name: str = "") -> RslRlOnPolicyRunnerCfg:
 # ----------------------------------------------------------------------------
 
 
-# 4-level curriculum (ramp DR0 -> DR1 -> DR2 -> DR3): DR0 = no DR; DR1 += block/
-# table color; DR2 += image realism + obs latency; DR3 = full (camera-pose jitter,
-# encoder bias, wide starts, servo lag). All share one experiment_name so each
-# stage's resume finds the prior run; run_name tags the run dir
-# (<timestamp>_dr<level>). The bare ``Mjlab-SO101-Block-Picking`` is kept as the
-# default/full (= DR3) task id for standalone tooling.
+# 4-level curriculum (ramp DR0 -> DR1 -> DR2 -> DR3). Only VISUAL DR is ramped:
+#   DR0 = non-visual DR (servo lag, encoder bias, wide ±0.3 starts) + always-on
+#         start randomization; vivid-pink block, sharp images, fixed cameras.
+#   DR1 += block/table color.
+#   DR2 += image realism (blur/noise/brightness) + obs latency.
+#   DR3 += camera-pose (extrinsics) jitter.
+# All share one experiment_name so each stage's resume finds the prior run;
+# run_name tags the run dir (<timestamp>_dr<level>). The bare
+# ``Mjlab-SO101-Block-Picking`` is the default/full (= DR3) id for tooling.
 _BLOCK_PICKING_LEVELS = {
   "Mjlab-SO101-Block-Picking": "dr3",
   "Mjlab-SO101-Block-Picking-DR0": "dr0",

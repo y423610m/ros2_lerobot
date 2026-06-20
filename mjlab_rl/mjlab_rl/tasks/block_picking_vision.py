@@ -287,10 +287,11 @@ def make_block_picking_vision_ppo_cfg(run_name: str = "") -> RslRlOnPolicyRunner
 # 4-level curriculum, all sharing one experiment_name ("so101_block_picking_vision")
 # so each stage's resume finds the prior run; run_name tags the run dir
 # (<timestamp>_dr<level>):
-#   DR0 : no DR — vivid pink, fixed cameras, sharp images, instant servos, near-home.
-#   DR1 : + block/table color (lights are always on).
+#   DR0 : non-visual DR only (servo lag, encoder bias, wide ±0.3 starts) — vivid
+#         pink, fixed cameras, sharp images.
+#   DR1 : + block/table color.
 #   DR2 : + image motion blur/noise/brightness + camera/proprioception latency.
-#   DR3 : full — + camera-pose jitter, encoder bias, wide ±0.3 starts, servo lag.
+#   DR3 : + camera-pose (extrinsics) jitter.
 # The bare ``Mjlab-SO101-Block-Picking-Rgb`` is kept as the default/full (= DR3)
 # task id for standalone tooling (export, deploy, play-zero, render).
 _BLOCK_PICKING_RGB_LEVELS = {
