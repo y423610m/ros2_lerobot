@@ -82,9 +82,11 @@ uv run python scripts/play.py Mjlab-SO101-Block-Picking \
   jaw opens/closes, so the policy's ee-to-block vector stays a clean function
   of arm joints 1–5.
 * **Randomization:** on every reset, the block is placed in
-  `(x ∈ [0.20, 0.35], y ∈ [-0.10, 0.10])` and the container in
-  `(x ∈ [-0.35, -0.20], y ∈ [-0.15, 0.05])`. Robot joints get a small
-  ±0.02 rad perturbation.
+  `(x ∈ [-0.55, -0.30], y ∈ [-0.045, 0.195])` and the container in
+  `(x ∈ [-0.45, -0.30], y ∈ [-0.245, -0.005])`, with a p=0.5 block↔container
+  swap. Arm joints get a ±0.3 rad perturbation and the gripper starts anywhere
+  in its range. (See the DR curriculum in `COMMANDS.md` for what each DR level
+  adds on top.)
 * **Termination:** time-out after 8 s (= 400 env steps at 50 Hz control),
   early termination if the block falls below `z = -0.05`.
 
