@@ -52,25 +52,24 @@ from mjlab_rl.assets import (
 from mjlab_rl.envs import mdp as task_mdp
 from mjlab_rl.envs.actions import RateLimitedJointPositionActionCfg
 
-# Domain-randomization curriculum. Grasping a 2 cm block is a fragile exploration
-# bottleneck: it's only discovered via the lift reward, so any DR that adds noise
-# during exploration tips the policy into the easy reach-only optimum. Turning all
-# DR on at once *after* grasping is learned is just as fatal — the grasp collapses
-# at the resume boundary and never recovers. So ramp DR in three stages, each a
-# separate task id sharing one experiment_name (so resume finds the prior run):
+# Domain-randomization curriculum. Vision-based grasping of a 2 cm block is a
+# fragile exploration bottleneck: *visual* DR that adds noise during exploration
+# tips the policy into the easy reach-only optimum, and adding too much visual DR
+# at once *after* grasping is learned collapses the grasp at the resume boundary.
+# So ramp only the VISUAL DR, one kind per stage, each a task id sharing one
+# experiment_name (so resume finds the prior run):
 #
-#   dr_level="none" (``-NoDR``)  : no DR, vivid-pink block, near-home (+/-0.02)
-#                                  starts. Learn the grasp here.
-#   dr_level="soft" (``-SoftDR``): appearance DR only — block color (spanning
-#                                  pink<->salmon, so no visual cliff), table-color
-#                                  noise, lights. Geometry unchanged (near-home
-#                                  starts, no camera jitter, no encoder bias).
-#                                  The vision actor adapts appearance while the
-#                                  grasp survives.
-#   dr_level="full" (default)    : everything — wide +/-0.3 starts, encoder bias,
-#                                  camera pos/quat jitter, on top of soft DR.
+#   dr_level="dr0" : non-visual DR only (servo lag, encoder bias, wide +/-0.3
+#                    starts) — these don't corrupt the camera image, so the grasp
+#                    can be learned robust to them with a clean camera (vivid-pink
+#                    block, sharp images, fixed cameras). Learn the grasp here.
+#   dr_level="dr1" : + block/table color (spanning pink<->salmon, no visual cliff).
+#   dr_level="dr2" : + image realism (motion blur, pixel noise, brightness/
+#                    contrast) + camera/proprioception obs latency. Cameras still
+#                    geometrically fixed.
+#   dr_level="dr3" : + camera-pose (extrinsics) jitter. The full deploy setup.
 #
-# Workflow: train NoDR -> resume SoftDR -> resume full DR.
+# Workflow: train dr0 -> resume dr1 -> resume dr2 -> resume dr3.
 
 # ----------------------------------------------------------------------------
 # Geometry / randomization ranges. All numbers are in meters / radians.
@@ -286,10 +285,10 @@ def make_block_picking_env_cfg(
       params={"p_on": 0.6, "ensure_one_on": True},
     ),
     # Per-episode block color spanning the full range from the vivid pink the
-    # NoDR phase trained on (1.0, 0.40, 0.70) to the real target's salmon
+    # dr0 phase trained on (1.0, 0.40, 0.70) to the real target's salmon
     # (1.0, 0.72, 0.62). operation="abs" sets the color absolutely; the ranges
     # cover BOTH endpoints (+ a little margin) so there is no visual cliff at the
-    # NoDR->SoftDR boundary — the policy still sees pink sometimes and adapts to
+    # dr0->dr1 boundary — the policy still sees pink sometimes and adapts to
     # salmon gradually, while staying robust to the deployment color.
     "randomize_block_color": EventTermCfg(
       func=dr.mat_rgba,

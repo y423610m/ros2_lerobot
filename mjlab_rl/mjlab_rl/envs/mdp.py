@@ -85,8 +85,8 @@ def camera_rgb_aug(
     ``contrast``/``brightness``.
   * **Pixel noise** — additive Gaussian with std ``noise_std``.
 
-  All strengths default to 0 → an identity wrapper of ``camera_rgb`` (used at
-  ``dr_level="none"``)."""
+  All strengths default to 0 → an identity wrapper of ``camera_rgb`` (used below
+  ``dr_level="dr2"``)."""
   rgb = camera_rgb(env, sensor_name)  # (B, 3, H, W) float [0, 1]
   if blur_strength <= 0 and noise_std <= 0 and brightness <= 0 and contrast <= 0:
     return rgb
