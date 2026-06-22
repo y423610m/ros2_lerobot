@@ -119,27 +119,21 @@ def make_block_picking_vision_env_cfg(play: bool = False, dr_level: str = "dr3")
   # --- Camera extrinsics randomization ----------------------------------
   # Per-episode jitter of each camera's mount pose so the policy is robust to
   # the real rig not matching the sim extrinsics exactly (a cause of the
-  # residual ee-placement error on hardware). The FULL deploy ranges (top
-  # ±10 cm/±15°, wrist ±2 cm/±5°) are a big visual shift — turning them on at
-  # once at dr3 collapsed the grasp. So ramp them across the visual curriculum,
-  # scaled linearly by level: 1/3 at dr1, 2/3 at dr2, full at dr3 (none at dr0).
-  cam_frac = order / 3.0
-  _WRIST_RPY = (-math.radians(5.0) * cam_frac, math.radians(5.0) * cam_frac)
-  _TOP_RPY = (-math.radians(15.0) * cam_frac, math.radians(15.0) * cam_frac)
-  _WRIST_UV = 0.02 * cam_frac
-  _TOP_POS = 0.10 * cam_frac
+  # residual ee-placement error on hardware).
+  _WRIST_RPY = (-math.radians(5.0), math.radians(5.0))
+  _TOP_RPY = (-math.radians(15.0), math.radians(15.0))
 
   # Wrist cam ("robot/hand_eye"), rigidly bolted to the wrist. Position is
   # jittered ONLY within its image plane (local x/y), NOT along the optical
   # axis (depth) — its optical axis is tilted, so plain cam_pos can't isolate
-  # that. Full ±2 cm in-plane, ±5° orientation (× cam_frac).
+  # that. ±2 cm in-plane, ±5° orientation.
   cfg.events["wrist_cam_pos"] = EventTermCfg(
     func=task_mdp.randomize_cam_pos_in_image_plane,
     mode="reset",
     params={
       "camera_name": "robot/hand_eye",
-      "u_range": (-_WRIST_UV, _WRIST_UV),
-      "v_range": (-_WRIST_UV, _WRIST_UV),
+      "u_range": (-0.02, 0.02),
+      "v_range": (-0.02, 0.02),
     },
   )
   cfg.events["wrist_cam_quat"] = EventTermCfg(
@@ -153,14 +147,14 @@ def make_block_picking_vision_env_cfg(play: bool = False, dr_level: str = "dr3")
     },
   )
 
-  # Top cam ("top_cam"), free-standing overhead rig. Full ±10 cm position offset
-  # (all axes) and ±15° orientation, scaled by cam_frac so it ramps to full at dr3.
+  # Top cam ("top_cam"), free-standing overhead rig. Full ±10 cm position
+  # offset (all axes) and ±15° orientation — unchanged.
   cfg.events["top_cam_pos"] = EventTermCfg(
     func=dr.cam_pos,
     mode="reset",
     params={
       "asset_cfg": SceneEntityCfg("table", camera_names=("top_cam",)),
-      "ranges": (-_TOP_POS, _TOP_POS),
+      "ranges": (-0.10, 0.10),
       "operation": "add",
     },
   )
@@ -175,9 +169,10 @@ def make_block_picking_vision_env_cfg(play: bool = False, dr_level: str = "dr3")
     },
   )
 
-  # Camera-pose jitter ramps from dr1 (scaled by cam_frac above); dr0 keeps fixed
-  # cameras so the grasp is learned against a stable view first.
-  if order < 1:
+  # Camera-extrinsics jitter is geometric DR -> dr3 only. Below dr3 the policy
+  # learns/keeps the grasp against fixed cameras (dr1 varies block/table color,
+  # dr2 the image realism, but neither moves the camera pose).
+  if order < 3:
     for _k in ("wrist_cam_pos", "wrist_cam_quat", "top_cam_pos", "top_cam_quat"):
       cfg.events.pop(_k, None)
 
@@ -294,10 +289,9 @@ def make_block_picking_vision_ppo_cfg(run_name: str = "") -> RslRlOnPolicyRunner
 # (<timestamp>_dr<level>):
 #   DR0 : non-visual DR only (servo lag, encoder bias, wide ±0.3 starts) — vivid
 #         pink, fixed cameras, sharp images.
-#   DR1 : + block/table color, + camera-pose jitter @ 1/3.
-#   DR2 : + image motion blur/noise/brightness + camera/proprioception latency,
-#         + camera-pose jitter @ 2/3.
-#   DR3 : + camera-pose jitter @ full (top ±10 cm/±15°, wrist ±2 cm/±5°).
+#   DR1 : + block/table color.
+#   DR2 : + image motion blur/noise/brightness + camera/proprioception latency.
+#   DR3 : + camera-pose (extrinsics) jitter.
 # The bare ``Mjlab-SO101-Block-Picking-Rgb`` is kept as the default/full (= DR3)
 # task id for standalone tooling (export, deploy, play-zero, render).
 _BLOCK_PICKING_RGB_LEVELS = {

@@ -63,13 +63,11 @@ from mjlab_rl.envs.actions import RateLimitedJointPositionActionCfg
 #                    starts) — these don't corrupt the camera image, so the grasp
 #                    can be learned robust to them with a clean camera (vivid-pink
 #                    block, sharp images, fixed cameras). Learn the grasp here.
-#   dr_level="dr1" : + block/table color (pink<->salmon), + camera-pose jitter @ 1/3.
+#   dr_level="dr1" : + block/table color (spanning pink<->salmon, no visual cliff).
 #   dr_level="dr2" : + image realism (motion blur, pixel noise, brightness/
-#                    contrast) + camera/proprioception obs latency, + camera-pose
-#                    jitter @ 2/3.
-#   dr_level="dr3" : + camera-pose jitter @ full (the full deploy setup). Camera
-#                    jitter is ramped 1/3->2/3->full across dr1-3 to avoid a
-#                    sudden visual-geometry shock collapsing the grasp.
+#                    contrast) + camera/proprioception obs latency. Cameras still
+#                    geometrically fixed.
+#   dr_level="dr3" : + camera-pose (extrinsics) jitter. The full deploy setup.
 #
 # Workflow: train dr0 -> resume dr1 -> resume dr2 -> resume dr3.
 
@@ -631,10 +629,9 @@ def make_block_picking_ppo_cfg(run_name: str = "") -> RslRlOnPolicyRunnerCfg:
 # 4-level curriculum (ramp DR0 -> DR1 -> DR2 -> DR3). Only VISUAL DR is ramped:
 #   DR0 = non-visual DR (servo lag, encoder bias, wide ±0.3 starts) + always-on
 #         start randomization; vivid-pink block, sharp images, fixed cameras.
-#   DR1 += block/table color (+ camera-pose jitter @ 1/3, vision task only).
-#   DR2 += image realism (blur/noise/brightness) + obs latency (+ jitter @ 2/3).
-#   DR3 += camera-pose jitter @ full (vision task only). Camera jitter ramps
-#          1/3->2/3->full across dr1-3; see block_picking_vision.py.
+#   DR1 += block/table color.
+#   DR2 += image realism (blur/noise/brightness) + obs latency.
+#   DR3 += camera-pose (extrinsics) jitter.
 # All share one experiment_name so each stage's resume finds the prior run;
 # run_name tags the run dir (<timestamp>_dr<level>). The bare
 # ``Mjlab-SO101-Block-Picking`` is the default/full (= DR3) id for tooling.
