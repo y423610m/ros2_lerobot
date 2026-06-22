@@ -230,8 +230,8 @@ of the previous:
 |---|---|---|
 | DR0 | `…-Rgb-DR0` | **servo lag + encoder bias + wide ±0.3 arm starts** (non-visual); vivid-pink block, sharp images, fixed cameras |
 | DR1 | `…-Rgb-DR1` | block color (pink↔salmon) + table-color noise |
-| DR2 | `…-Rgb-DR2` | **image motion blur + pixel noise + brightness/contrast + camera & proprioception latency** (cameras geometrically fixed) |
-| DR3 | `…-Rgb-DR3` (= bare `…-Rgb`) | **camera-pose (extrinsics) jitter** |
+| DR2 | `…-Rgb-DR2` | **image motion blur + pixel noise + brightness/contrast + camera & proprioception latency** + **camera-pose jitter @ ½** (±2.5°/±1.5 cm) |
+| DR3 | `…-Rgb-DR3` (= bare `…-Rgb`) | **camera-pose jitter @ full** (±5°/±3 cm; ramped ½→full across DR2–DR3) |
 
 Per-factor matrix (✓ = active at that level):
 
@@ -243,8 +243,8 @@ Per-factor matrix (✓ = active at that level):
 | block/table color | ✗ | ✓ | ✓ | ✓ |
 | image blur + pixel noise + brightness/contrast | ✗ | ✗ | ✓ | ✓ |
 | camera + proprioception obs latency | ✗ | ✗ | ✓ | ✓ |
-| camera-pose (extrinsics) jitter | ✗ | ✗ | ✗ | ✓ |
-| anti-collapse PPO hyperparams (resume task) | — | ✗ | ✗ | ✓ |
+| camera-pose (extrinsics) jitter | ✗ | ✗ | ½ | full |
+| anti-collapse PPO hyperparams (resume task) | — | ✗ | ✓ | ✓ |
 | run-dir tag (`run_name`) | `_dr0` | `_dr1` | `_dr2` | `_dr3` |
 
 Always-on start randomization (every level, including DR0): block & container XY
@@ -259,20 +259,20 @@ dynamics — so deploy/export are unchanged. Tune ranges in `block_picking_visio
 `alpha_range`/`lag_range`, `BLOCK_XY_RANGE`/`CONTAINER_XY_RANGE`, swap `p`).
 
 ```bash
-# DR0 — learn the grasp, no DR. Watch Episode_Reward/lift climb off ~0.
-pixi run train-mjlab-vision-dr0                                   # ~8000 iters → run dir ..._dr0
+# DR0 — learn the grasp with non-visual DR (servo lag, encoder bias, wide starts)
+# but a clean camera. Fresh train. Watch Episode_Reward/lift climb off ~0.
+pixi run train-mjlab-vision-dr0                                   # ~16000 iters → ..._dr0
 
-# DR1 — adapt to block/table COLOR only. Resume the DR0 run; expect a tiny dip.
-RUN=<dr0_run> CKPT=model_8000.pt pixi run train-mjlab-vision-dr1-resume
+# DR1 — + block/table COLOR only (cameras still fixed). Tiny dip expected.
+RUN=<dr0_run> CKPT=model_15000.pt pixi run train-mjlab-vision-dr1-resume
 
-# DR2 — add IMAGE realism (blur/noise/brightness + obs latency); cameras still
-# fixed. Resume a good DR1 run; watch lift/success survive the visual shift.
-RUN=<dr1_run> CKPT=model_16000.pt pixi run train-mjlab-vision-dr2-resume
+# DR2 — + IMAGE realism (blur/noise/brightness + obs latency) + camera-pose
+# jitter @ ½. Lower-LR resume (camera jitter collapses the grasp under default LR).
+RUN=<dr1_run> CKPT=model_<N>.pt pixi run train-mjlab-vision-dr2-resume
 
-# DR3 — add the geometric DR + servo lag. Bakes in anti-collapse PPO hyperparams
-# (lower LR, smaller KL step, more entropy, tighter grad clip). Resume a
-# KNOWN-GOOD (pre-collapse) DR2 run. Override: LR=1e-4 KL=0.005 ENT=0.03 GN=0.5 …
-RUN=<dr2_run> CKPT=model_16000.pt pixi run train-mjlab-vision-dr3-resume
+# DR3 — + camera-pose jitter @ full (ramped ½→full). Same lower-LR bundle.
+# Override knobs: LR=1e-4 KL=0.005 ENT=0.03 GN=0.5 RUN=… CKPT=… pixi run …-dr3-resume
+RUN=<dr2_run> CKPT=model_<N>.pt pixi run train-mjlab-vision-dr3-resume
 ```
 
 At each resume watch `Episode_Reward/lift`/`success`. Two distinct failure modes:

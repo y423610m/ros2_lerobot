@@ -65,9 +65,11 @@ from mjlab_rl.envs.actions import RateLimitedJointPositionActionCfg
 #                    block, sharp images, fixed cameras). Learn the grasp here.
 #   dr_level="dr1" : + block/table color (spanning pink<->salmon, no visual cliff).
 #   dr_level="dr2" : + image realism (motion blur, pixel noise, brightness/
-#                    contrast) + camera/proprioception obs latency. Cameras still
-#                    geometrically fixed.
-#   dr_level="dr3" : + camera-pose (extrinsics) jitter. The full deploy setup.
+#                    contrast) + camera/proprioception obs latency + camera-pose
+#                    jitter @ 1/2.
+#   dr_level="dr3" : + camera-pose jitter @ full (the full deploy setup). Camera
+#                    jitter ramps 1/2->full across dr2-3 (gated/scaled in
+#                    block_picking_vision.py) to avoid a sudden visual shock.
 #
 # Workflow: train dr0 -> resume dr1 -> resume dr2 -> resume dr3.
 
@@ -112,7 +114,7 @@ def make_block_picking_env_cfg(
   # exploration is the fragile part:
   #   color_dr (dr1+)     : block/table color.
   #   image_dr (dr2+)     : image motion blur/noise/brightness + obs latency.
-  #   camera-pose jitter  : dr3 (gated in block_picking_vision.py).
+  #   camera-pose jitter  : dr2-dr3, ramped 1/2->full (in block_picking_vision.py).
   # The *non-visual* DR (servo lag, encoder bias, wide ±0.3 arm starts) is ON at
   # ALL levels including dr0 — it doesn't corrupt the camera image, so it doesn't
   # tip the policy into the reach-only optimum during early grasp learning, and
@@ -630,8 +632,10 @@ def make_block_picking_ppo_cfg(run_name: str = "") -> RslRlOnPolicyRunnerCfg:
 #   DR0 = non-visual DR (servo lag, encoder bias, wide ±0.3 starts) + always-on
 #         start randomization; vivid-pink block, sharp images, fixed cameras.
 #   DR1 += block/table color.
-#   DR2 += image realism (blur/noise/brightness) + obs latency.
-#   DR3 += camera-pose (extrinsics) jitter.
+#   DR2 += image realism (blur/noise/brightness) + obs latency + camera-pose
+#          jitter @ 1/2 (vision task only).
+#   DR3 += camera-pose jitter @ full (vision task only). Jitter ramps 1/2->full
+#          across dr2-3; see block_picking_vision.py.
 # All share one experiment_name so each stage's resume finds the prior run;
 # run_name tags the run dir (<timestamp>_dr<level>). The bare
 # ``Mjlab-SO101-Block-Picking`` is the default/full (= DR3) id for tooling.

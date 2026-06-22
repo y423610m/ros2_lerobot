@@ -120,23 +120,28 @@ def make_block_picking_vision_env_cfg(play: bool = False, dr_level: str = "dr3")
   # Per-episode jitter of each camera's mount pose so the policy is robust to
   # the real rig not matching the sim extrinsics exactly (a cause of the
   # residual ee-placement error on hardware).
-  # Reduced from ±15°/±10 cm (top) and ±5°/±2 cm (wrist): the full ranges are a
-  # large spatial image shift that collapsed the grasp at the dr2->dr3 boundary,
-  # and are larger than realistic mounting error anyway.
-  _WRIST_RPY = (-math.radians(3.0), math.radians(3.0))
-  _TOP_RPY = (-math.radians(5.0), math.radians(5.0))
+  # Camera-pose jitter ramps across dr2->dr3 (half at dr2, full at dr3; none
+  # below dr2). "Full" = reduced ranges (top ±5°/±3 cm, wrist ±3°/±1.5 cm): the
+  # original ±15°/±10 cm is a large spatial image shift that collapsed the grasp,
+  # and is larger than realistic mounting error anyway. Introducing it at dr2
+  # alongside the image realism (rather than alone at dr3) gives a gentler ramp.
+  cam_frac = (order - 1) / 2.0 if order >= 2 else 0.0  # dr2 -> 0.5, dr3 -> 1.0
+  _WRIST_RPY = (-math.radians(3.0) * cam_frac, math.radians(3.0) * cam_frac)
+  _TOP_RPY = (-math.radians(5.0) * cam_frac, math.radians(5.0) * cam_frac)
+  _WRIST_UV = 0.015 * cam_frac
+  _TOP_POS = 0.03 * cam_frac
 
   # Wrist cam ("robot/hand_eye"), rigidly bolted to the wrist. Position is
   # jittered ONLY within its image plane (local x/y), NOT along the optical
   # axis (depth) — its optical axis is tilted, so plain cam_pos can't isolate
-  # that. ±1.5 cm in-plane, ±3° orientation.
+  # that. Full ±1.5 cm in-plane, ±3° orientation (× cam_frac).
   cfg.events["wrist_cam_pos"] = EventTermCfg(
     func=task_mdp.randomize_cam_pos_in_image_plane,
     mode="reset",
     params={
       "camera_name": "robot/hand_eye",
-      "u_range": (-0.015, 0.015),
-      "v_range": (-0.015, 0.015),
+      "u_range": (-_WRIST_UV, _WRIST_UV),
+      "v_range": (-_WRIST_UV, _WRIST_UV),
     },
   )
   cfg.events["wrist_cam_quat"] = EventTermCfg(
@@ -150,14 +155,14 @@ def make_block_picking_vision_env_cfg(play: bool = False, dr_level: str = "dr3")
     },
   )
 
-  # Top cam ("top_cam"), free-standing overhead rig. ±3 cm position offset (all
-  # axes) and ±5° orientation (reduced from ±10 cm / ±15°).
+  # Top cam ("top_cam"), free-standing overhead rig. Full ±3 cm position offset
+  # (all axes) and ±5° orientation (× cam_frac), reduced from ±10 cm / ±15°.
   cfg.events["top_cam_pos"] = EventTermCfg(
     func=dr.cam_pos,
     mode="reset",
     params={
       "asset_cfg": SceneEntityCfg("table", camera_names=("top_cam",)),
-      "ranges": (-0.03, 0.03),
+      "ranges": (-_TOP_POS, _TOP_POS),
       "operation": "add",
     },
   )
@@ -172,10 +177,9 @@ def make_block_picking_vision_env_cfg(play: bool = False, dr_level: str = "dr3")
     },
   )
 
-  # Camera-extrinsics jitter is geometric DR -> dr3 only. Below dr3 the policy
-  # learns/keeps the grasp against fixed cameras (dr1 varies block/table color,
-  # dr2 the image realism, but neither moves the camera pose).
-  if order < 3:
+  # Camera-pose jitter active from dr2 (ramped via cam_frac). dr0/dr1 keep fixed
+  # cameras so the grasp and color are learned against a stable view first.
+  if order < 2:
     for _k in ("wrist_cam_pos", "wrist_cam_quat", "top_cam_pos", "top_cam_quat"):
       cfg.events.pop(_k, None)
 
@@ -293,8 +297,9 @@ def make_block_picking_vision_ppo_cfg(run_name: str = "") -> RslRlOnPolicyRunner
 #   DR0 : non-visual DR only (servo lag, encoder bias, wide ±0.3 starts) — vivid
 #         pink, fixed cameras, sharp images.
 #   DR1 : + block/table color.
-#   DR2 : + image motion blur/noise/brightness + camera/proprioception latency.
-#   DR3 : + camera-pose (extrinsics) jitter.
+#   DR2 : + image motion blur/noise/brightness + camera/proprioception latency
+#         + camera-pose jitter @ 1/2 (±2.5°/±1.5 cm).
+#   DR3 : + camera-pose jitter @ full (±5°/±3 cm). Jitter ramps 1/2->full dr2-3.
 # The bare ``Mjlab-SO101-Block-Picking-Rgb`` is kept as the default/full (= DR3)
 # task id for standalone tooling (export, deploy, play-zero, render).
 _BLOCK_PICKING_RGB_LEVELS = {

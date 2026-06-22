@@ -59,15 +59,15 @@ train-mjlab-vision-dr0 = "cd $PIXI_PROJECT_ROOT/mjlab_rl && bash -c 'uv run pyth
 # Set RUN/CKPT to the DR0 run, e.g. RUN=2026-06-20_.._dr0 CKPT=model_15000.pt.
 train-mjlab-vision-dr1-resume = "cd $PIXI_PROJECT_ROOT/mjlab_rl && bash -c 'uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb-DR1 --env.scene.num-envs ${NENV:-1024} --agent.max-iterations ${ITER:-16000} --agent.logger tensorboard --agent.resume True --agent.load-run ${RUN:-.*} --agent.load-checkpoint ${CKPT:-model_.*.pt}'"
 # DR curriculum DR2: resume the DR1 run adding IMAGE realism (motion blur + pixel
-# noise + brightness/contrast + camera/proprioception latency); cameras still
-# geometrically fixed (camera-pose jitter is DR3). Set RUN/CKPT to a good DR1 run.
-train-mjlab-vision-dr2-resume = "cd $PIXI_PROJECT_ROOT/mjlab_rl && bash -c 'uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb-DR2 --env.scene.num-envs ${NENV:-1024} --agent.max-iterations ${ITER:-16000} --agent.logger tensorboard --agent.resume True --agent.load-run ${RUN:-.*} --agent.load-checkpoint ${CKPT:-model_.*.pt}'"
-# DR curriculum DR3: resume the DR2 run under FULL DR (adds camera-pose jitter,
-# encoder bias, wide ±0.3 starts, servo lag). Set RUN/CKPT to a KNOWN-GOOD
-# (pre-collapse) DR2 run. Anti-collapse hyperparameters (full DR is high-variance
-# and the late, sudden policy collapse is a destructive PPO update): lower LR,
-# smaller per-iteration KL step, more entropy so the action std doesn't decay to
-# brittle-deterministic, tighter grad clip. DR0-DR2 keep the faster default cfg.
+# noise + brightness/contrast + camera/proprioception latency) + camera-pose
+# jitter @ 1/2 (±2.5°/±1.5 cm). Uses the lower-LR / anti-collapse bundle (camera
+# jitter is a spatial image shift that collapses the grasp under the default LR).
+# Set RUN/CKPT to a good DR1 run.
+train-mjlab-vision-dr2-resume = "cd $PIXI_PROJECT_ROOT/mjlab_rl && bash -c 'uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb-DR2 --env.scene.num-envs ${NENV:-1024} --agent.max-iterations ${ITER:-16000} --agent.logger tensorboard --agent.resume True --agent.load-run ${RUN:-.*} --agent.load-checkpoint ${CKPT:-model_.*.pt} --agent.algorithm.learning-rate ${LR:-2e-4} --agent.algorithm.desired-kl ${KL:-0.006} --agent.algorithm.entropy-coef ${ENT:-0.02} --agent.algorithm.max-grad-norm ${GN:-0.5}'"
+# DR curriculum DR3: resume the DR2 run with camera-pose jitter @ FULL (±5°/±3 cm;
+# ramped 1/2->full across dr2-3). Non-visual DR (encoder bias, wide ±0.3 starts,
+# servo lag) is already on from DR0. Same lower-LR / anti-collapse bundle as DR2.
+# Set RUN/CKPT to a good (pre-collapse) DR2 run.
 train-mjlab-vision-dr3-resume = "cd $PIXI_PROJECT_ROOT/mjlab_rl && bash -c 'uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb-DR3 --env.scene.num-envs ${NENV:-1024} --agent.max-iterations ${ITER:-24000} --agent.logger tensorboard --agent.resume True --agent.load-run ${RUN:-.*} --agent.load-checkpoint ${CKPT:-model_.*.pt} --agent.algorithm.learning-rate ${LR:-2e-4} --agent.algorithm.desired-kl ${KL:-0.006} --agent.algorithm.entropy-coef ${ENT:-0.02} --agent.algorithm.max-grad-norm ${GN:-0.5}'"
 # Replay the vision policy in viser. Uses the full-DR (DR3) task, so reset events
 # (camera-pose jitter, encoder bias, wide starts, salmon block + color noise,
