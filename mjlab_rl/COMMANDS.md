@@ -229,9 +229,13 @@ of the previous:
 | level | task id | adds (on top of previous) |
 |---|---|---|
 | DR0 | `…-Rgb-DR0` | **servo lag + encoder bias + wide ±0.3 arm starts** (non-visual); vivid-pink block, sharp images, fixed cameras |
-| DR1 | `…-Rgb-DR1` | block color (pink↔salmon) + table-color noise |
-| DR2 | `…-Rgb-DR2` | **image motion blur + pixel noise + brightness/contrast + camera & proprioception latency** (cameras geometrically fixed) |
-| DR3 | `…-Rgb-DR3` (= bare `…-Rgb`) | **camera-pose (extrinsics) jitter** |
+| DR1 | `…-Rgb-DR1` | block color (pink↔salmon) + table-color noise + **camera-pose jitter @ ⅓** |
+| DR2 | `…-Rgb-DR2` | **image motion blur + pixel noise + brightness/contrast + camera & proprioception latency** + **camera-pose jitter @ ⅔** |
+| DR3 | `…-Rgb-DR3` (= bare `…-Rgb`) | **camera-pose (extrinsics) jitter @ full** (top ±10 cm/±15°, wrist ±2 cm/±5°) |
+
+Camera-pose jitter is **ramped** (scaled by `order/3`: ⅓→⅔→full across DR1–DR3)
+rather than switched on at DR3 — turning the full range on at once collapsed the
+grasp at the DR2→DR3 boundary.
 
 Per-factor matrix (✓ = active at that level):
 
@@ -243,7 +247,7 @@ Per-factor matrix (✓ = active at that level):
 | block/table color | ✗ | ✓ | ✓ | ✓ |
 | image blur + pixel noise + brightness/contrast | ✗ | ✗ | ✓ | ✓ |
 | camera + proprioception obs latency | ✗ | ✗ | ✓ | ✓ |
-| camera-pose (extrinsics) jitter | ✗ | ✗ | ✗ | ✓ |
+| camera-pose (extrinsics) jitter | ✗ | ⅓ | ⅔ | full |
 | anti-collapse PPO hyperparams (resume task) | — | ✗ | ✗ | ✓ |
 | run-dir tag (`run_name`) | `_dr0` | `_dr1` | `_dr2` | `_dr3` |
 
