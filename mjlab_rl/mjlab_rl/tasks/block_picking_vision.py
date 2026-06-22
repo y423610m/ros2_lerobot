@@ -120,20 +120,23 @@ def make_block_picking_vision_env_cfg(play: bool = False, dr_level: str = "dr3")
   # Per-episode jitter of each camera's mount pose so the policy is robust to
   # the real rig not matching the sim extrinsics exactly (a cause of the
   # residual ee-placement error on hardware).
-  _WRIST_RPY = (-math.radians(5.0), math.radians(5.0))
-  _TOP_RPY = (-math.radians(15.0), math.radians(15.0))
+  # Reduced from ±15°/±10 cm (top) and ±5°/±2 cm (wrist): the full ranges are a
+  # large spatial image shift that collapsed the grasp at the dr2->dr3 boundary,
+  # and are larger than realistic mounting error anyway.
+  _WRIST_RPY = (-math.radians(3.0), math.radians(3.0))
+  _TOP_RPY = (-math.radians(5.0), math.radians(5.0))
 
   # Wrist cam ("robot/hand_eye"), rigidly bolted to the wrist. Position is
   # jittered ONLY within its image plane (local x/y), NOT along the optical
   # axis (depth) — its optical axis is tilted, so plain cam_pos can't isolate
-  # that. ±2 cm in-plane, ±5° orientation.
+  # that. ±1.5 cm in-plane, ±3° orientation.
   cfg.events["wrist_cam_pos"] = EventTermCfg(
     func=task_mdp.randomize_cam_pos_in_image_plane,
     mode="reset",
     params={
       "camera_name": "robot/hand_eye",
-      "u_range": (-0.02, 0.02),
-      "v_range": (-0.02, 0.02),
+      "u_range": (-0.015, 0.015),
+      "v_range": (-0.015, 0.015),
     },
   )
   cfg.events["wrist_cam_quat"] = EventTermCfg(
@@ -147,14 +150,14 @@ def make_block_picking_vision_env_cfg(play: bool = False, dr_level: str = "dr3")
     },
   )
 
-  # Top cam ("top_cam"), free-standing overhead rig. Full ±10 cm position
-  # offset (all axes) and ±15° orientation — unchanged.
+  # Top cam ("top_cam"), free-standing overhead rig. ±3 cm position offset (all
+  # axes) and ±5° orientation (reduced from ±10 cm / ±15°).
   cfg.events["top_cam_pos"] = EventTermCfg(
     func=dr.cam_pos,
     mode="reset",
     params={
       "asset_cfg": SceneEntityCfg("table", camera_names=("top_cam",)),
-      "ranges": (-0.10, 0.10),
+      "ranges": (-0.03, 0.03),
       "operation": "add",
     },
   )
