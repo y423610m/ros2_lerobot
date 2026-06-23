@@ -21,7 +21,11 @@
       <geom contype="0" conaffinity="0"/>
       <joint damping="0.60" frictionloss="0.052" armature="0.028"/>
       <!-- For lerobot this are not exactly the motor params as the Kp and Kd not map 1-to-1 thus motor idendification with lerobot Kp=16 and Kd=32 should actually be done -->
-      <position kp="17.8"/>
+      <!-- kv is the D term: τ = kp·(ctrl − q) − kv·q̇. Joint already has
+           damping=0.60; with effective inertia ~0.07 kg·m² and kp=17.8, critical
+           damping kv_crit ≈ 2.2. kv=2.0 is just under critical, matching how a
+           real Feetech servo feels. -->
+      <position kp="17.8" kv="2.0"/>
     </default>
     <default class="backlash">
       <!-- +/- 0.5° of backlash -->
