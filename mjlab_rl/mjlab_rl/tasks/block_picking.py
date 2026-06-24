@@ -488,6 +488,7 @@ def make_block_picking_env_cfg(
   if order < 1:
     for _r in (
       "action_rate_l2",
+      "joint_pos_limits",
       "container_displacement",
       "container_rotation",
       "gripper_table_contact",
