@@ -230,7 +230,7 @@ of the previous:
 |---|---|---|
 | DR0 | `…-Rgb-DR0` | **servo lag + encoder bias + wide ±0.3 arm starts** (non-visual); vivid-pink block, sharp images, fixed cameras |
 | DR1 | `…-Rgb-DR1` | block color (pink↔salmon) + table-color noise |
-| DR2 | `…-Rgb-DR2` | **image motion blur + pixel noise + brightness/contrast + camera & proprioception latency** + **camera-pose jitter @ ½** (±2.5°/±1.5 cm) |
+| DR2 | `…-Rgb-DR2` | **image motion blur + pixel noise + brightness/contrast + specular glare + cast shadows + camera & proprioception latency** + **camera-pose jitter @ ½** (±2.5°/±1.5 cm) |
 | DR3 | `…-Rgb-DR3` (= bare `…-Rgb`) | **camera-pose jitter @ full** (±5°/±3 cm; ramped ½→full across DR2–DR3) |
 
 Per-factor matrix (✓ = active at that level):
@@ -242,6 +242,7 @@ Per-factor matrix (✓ = active at that level):
 | wide arm start range (±0.3) | ✓ | ✓ | ✓ | ✓ |
 | block/table color | ✗ | ✓ | ✓ | ✓ |
 | image blur + pixel noise + brightness/contrast | ✗ | ✗ | ✓ | ✓ |
+| specular glare (faked) + cast shadows | ✗ | ✗ | ✓ | ✓ |
 | camera + proprioception obs latency | ✗ | ✗ | ✓ | ✓ |
 | camera-pose (extrinsics) jitter | ✗ | ✗ | ½ | full |
 | anti-collapse PPO hyperparams (resume task) | — | ✗ | ✓ | ✓ |
@@ -255,8 +256,9 @@ opening across its full range** (closed↔open), and light on/off randomization.
 None of the realism factors change the exported `.jit` contract (`action_scale`/
 `target_ref`/`max_relative_target`/`control_dt`), only pixel content and sim
 dynamics — so deploy/export are unchanged. Tune ranges in `block_picking_vision.py`
-(`aug_params`, `cam_lag`), `block_picking.py` (`randomize_actuator_lag`
-`alpha_range`/`lag_range`, `BLOCK_XY_RANGE`/`CONTAINER_XY_RANGE`, swap `p`).
+(`aug_params` incl. `glare_prob`/`glare_intensity`, `cam_lag`, `use_shadows`),
+`block_picking.py` (`randomize_actuator_lag` `alpha_range`/`lag_range`,
+`BLOCK_XY_RANGE`/`CONTAINER_XY_RANGE`, swap `p`).
 
 ```bash
 # DR0 — learn the grasp with non-visual DR (servo lag, encoder bias, wide starts)
