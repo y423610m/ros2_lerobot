@@ -87,11 +87,12 @@ def make_block_picking_vision_env_cfg(play: bool = False, dr_level: str = "dr3")
     # debug tool.
     enabled_geom_groups=(0, 2),
     use_textures=True,
-    # mujoco-warp ray-traces shadows, so they are hard-edged / directional by
-    # construction (the OpenGL shadowsize/shadowscale knobs don't apply here).
-    # Adds GPU cost per camera per step and changes the policy's input
-    # distribution — retrain after flipping this.
-    use_shadows=False,
+    # mujoco-warp ray-traces shadows (hard-edged / directional; the OpenGL
+    # shadowsize/shadowscale knobs don't apply here). Off at dr0/dr1 so the grasp
+    # and color are learned against flat, shadow-free frames; ON from dr2 as part
+    # of the image-realism stage, so the policy sees cast shadows like the real
+    # bench. Adds GPU cost per camera per step.
+    use_shadows=(order >= 2),
   )
   wrist_cam = CameraSensorCfg(
     name="wrist_cam",
@@ -198,16 +199,21 @@ def make_block_picking_vision_env_cfg(play: bool = False, dr_level: str = "dr3")
   # joint_vel — fine, the critic only runs in sim).
 
   # Camera group — concatenated along channel dim (6 = 2 cams × 3 RGB).
-  # Image realism (sim2real) at soft/full: motion blur + pixel noise +
-  # brightness/contrast via camera_rgb_aug, and camera latency via the obs
-  # term's built-in delay buffer. At none the aug params are 0 (identity wrapper
-  # of camera_rgb) and there is no delay, matching the sharp clean sim image.
+  # Image realism (sim2real) from dr2: motion blur + pixel noise + brightness/
+  # contrast + specular glare via camera_rgb_aug, and camera latency via the obs
+  # term's built-in delay buffer. (Glare must be faked here because the warp
+  # camera renderer ignores material specular/shininess/reflectance — it only
+  # uses mat_rgba — so real specular hot-spots never appear from the scene.) At
+  # dr0/dr1 the aug params are 0 (identity wrapper of camera_rgb), no delay.
   img_aug = order >= 2
   aug_params = dict(
     blur_strength=2.0 if img_aug else 0.0,  # max Gaussian sigma (px) at full motion
     noise_std=0.02 if img_aug else 0.0,
     brightness=0.10 if img_aug else 0.0,
     contrast=0.10 if img_aug else 0.0,
+    glare_prob=0.5 if img_aug else 0.0,      # fraction of frames with a glare blob
+    glare_intensity=1.5 if img_aug else 0.0,  # max added brightness at blob center
+                                              # (>1 saturates a solid white core)
   )
   cam_lag = 1 if img_aug else 0  # camera latency, control steps (0-20 ms)
   cam_terms = {

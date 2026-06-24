@@ -70,6 +70,8 @@ def camera_rgb_aug(
   noise_std: float = 0.0,
   brightness: float = 0.0,
   contrast: float = 0.0,
+  glare_prob: float = 0.0,
+  glare_intensity: float = 0.0,
   motion_ref: float = 5.0,
   robot_name: str = "robot",
 ) -> torch.Tensor:
@@ -83,12 +85,22 @@ def camera_rgb_aug(
     exposed in the observation.
   * **Brightness/contrast** — per-env scalar gain+offset of magnitude
     ``contrast``/``brightness``.
+  * **Specular glare** — with prob ``glare_prob`` per env, add a bright Gaussian
+    hot-spot (white, intensity up to ``glare_intensity``) at a random location.
+    The warp camera renderer ignores material specular/shininess/reflectance, so
+    the real table's glare never appears from the scene — this fakes it.
   * **Pixel noise** — additive Gaussian with std ``noise_std``.
 
   All strengths default to 0 → an identity wrapper of ``camera_rgb`` (used below
   ``dr_level="dr2"``)."""
   rgb = camera_rgb(env, sensor_name)  # (B, 3, H, W) float [0, 1]
-  if blur_strength <= 0 and noise_std <= 0 and brightness <= 0 and contrast <= 0:
+  if (
+    blur_strength <= 0
+    and noise_std <= 0
+    and brightness <= 0
+    and contrast <= 0
+    and glare_prob <= 0
+  ):
     return rgb
 
   b = rgb.shape[0]
@@ -108,10 +120,42 @@ def camera_rgb_aug(
     rgb = (rgb - mean) * gain + mean
   if brightness > 0:
     rgb = rgb + (torch.rand(b, 1, 1, 1, device=dev) * 2 - 1) * brightness
+  if glare_prob > 0 and glare_intensity > 0:
+    rgb = _add_specular_glare(rgb, glare_prob, glare_intensity)
   if noise_std > 0:
     rgb = rgb + torch.randn_like(rgb) * noise_std
 
   return rgb.clamp(0.0, 1.0)
+
+
+def _add_specular_glare(
+  img: torch.Tensor, prob: float, max_intensity: float
+) -> torch.Tensor:
+  """Add a white Gaussian hot-spot (specular table glare) to a random subset of
+  the batch (``prob``), at a random location with random size + intensity. The
+  glare is masked to the **table surface** so it doesn't wash out the block,
+  container, or gripper: the table is low-chroma (gray) while those objects are
+  saturated, so we weight the blob by a "grayness" mask. ``img`` is ``(B, C, H,
+  W)`` in ``[0, 1]``; returns the same shape (un-clamped — the caller clamps)."""
+  b, _, h, w = img.shape
+  dev = img.device
+  on = (torch.rand(b, device=dev) < prob).float()  # (B,)
+  cy = torch.rand(b, device=dev) * h
+  cx = torch.rand(b, device=dev) * w
+  sigma = (0.25 + torch.rand(b, device=dev) * 0.30) * h  # 25-55% of height
+  inten = torch.rand(b, device=dev) * max_intensity
+  yy = torch.arange(h, device=dev, dtype=torch.float32).view(1, h, 1)
+  xx = torch.arange(w, device=dev, dtype=torch.float32).view(1, 1, w)
+  d2 = (yy - cy.view(b, 1, 1)) ** 2 + (xx - cx.view(b, 1, 1)) ** 2  # (B, H, W)
+  blob = (inten * on).view(b, 1, 1) * torch.exp(
+    -d2 / (2.0 * sigma.view(b, 1, 1) ** 2)
+  )
+  # Table mask: chroma = max-min over channels. Gray table → ~0 (keep glare);
+  # salmon block / green container / colored bits → high (suppress glare). Soft
+  # ramp so there's no hard edge: full glare at chroma 0, none by chroma 0.15.
+  chroma = img.max(dim=1).values - img.min(dim=1).values  # (B, H, W)
+  table_mask = (1.0 - chroma / 0.15).clamp(0.0, 1.0)
+  return img + (blob * table_mask).unsqueeze(1)  # white glare, table only
 
 
 def ee_to_block(
