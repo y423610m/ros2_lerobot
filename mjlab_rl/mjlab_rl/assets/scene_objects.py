@@ -11,7 +11,7 @@ from mjlab.entity import EntityCfg
 # Block dimensions (half-extents) and color.
 # 4.5 × 2 × 2 cm block.
 BLOCK_HALF_SIZE: tuple[float, float, float] = (0.0225, 0.01, 0.01)
-BLOCK_MASS: float = 0.05
+BLOCK_MASS: float = 0.015
 
 # Container visual mesh (rendered only — collision below uses primitive
 # boxes because MuJoCo Warp treats <geom type="mesh"> as the geom's convex
