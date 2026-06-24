@@ -481,6 +481,13 @@ def make_block_picking_env_cfg(
     ),
   }
 
+  # dr0 (grasp-discovery stage): drop the action-rate penalty. Discovering the
+  # grasp needs large, fast exploratory actions, and the action_rate_l2 cost
+  # fights that early on. Re-enabled from dr1 onward for action smoothness once
+  # the grasp is learned.
+  if order < 1:
+    rewards.pop("action_rate_l2", None)
+
   terminations = {
     "time_out": TerminationTermCfg(func=mdp_term.time_out, time_out=True),
     "block_dropped": TerminationTermCfg(
