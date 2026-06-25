@@ -83,42 +83,12 @@ def _strip_world_floor(spec: mujoco.MjSpec) -> None:
       spec.delete(geom)
 
 
-# Gripper finger collision geoms (fixed jaw + moving jaw). We make these the
-# grippy, contact-dominant surfaces so the (realistic, ±1.86 N·m) squeeze holds
-# the block.
-_GRIPPER_FINGER_GEOMS = (
-  "gripper_finger_collision_outer",
-  "gripper_finger_collision_inner",
-  "moving_jaw_finger_collision_outer",
-  "moving_jaw_finger_collision_inner",
-)
-
-
-def _grippify_fingers(spec: mujoco.MjSpec) -> None:
-  """Raise the gripper pads' friction + condim and give them contact priority.
-
-  The real STS3215 (non-pro) torque caps gripper squeeze at ±1.86 N·m, so we
-  can't grip harder — instead we make the pads grippy (high tangential μ) and
-  torsion-resistant (condim=4) so the block can't slip or twist out, and set
-  ``priority=1`` so the finger↔block contact uses the *finger's* friction/condim
-  regardless of the block's μ (robust to block-friction/color DR). Only the four
-  named finger geoms are touched — arm-link/table contacts are unaffected.
-  """
-  targets = set(_GRIPPER_FINGER_GEOMS)
-  for geom in spec.geoms:
-    if geom.name in targets:
-      geom.friction = [3.0, 0.1, 1e-4]
-      geom.condim = 4
-      geom.priority = 1
-
-
 def get_so101_spec() -> mujoco.MjSpec:
   spec = mujoco.MjSpec.from_file(str(SO101_XML))
   # The XML declares meshdir="assets" *and* mesh files prefixed with "assets/",
   # so the resolver doubles up. Clear meshdir to fix.
   spec.meshdir = ""
   _strip_world_floor(spec)
-  _grippify_fingers(spec)
   return spec
 
 
