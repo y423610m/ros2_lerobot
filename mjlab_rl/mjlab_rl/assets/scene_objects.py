@@ -68,7 +68,13 @@ def _make_block_spec() -> mujoco.MjSpec:
     size=BLOCK_HALF_SIZE,
     mass=BLOCK_MASS,
     material="block_mat",
-    friction=(1.5, 0.5, 0.5),
+    # Grippy sponge block: high tangential μ, and condim=4 so the torsional
+    # term (0.5) is active — resists the block twisting out of the pinch (and
+    # spinning on the table). Grip is dominated by the gripper pads' contact
+    # priority (see _grippify_fingers in so101.py), so this μ is mostly for the
+    # block↔table contact and as a sensible default.
+    friction=(3.0, 0.5, 0.5),
+    condim=4,
   )
   body.add_site(name="block_site", pos=(0, 0, 0), size=(0.003,))
   return spec
