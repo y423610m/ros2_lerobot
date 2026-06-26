@@ -447,7 +447,10 @@ def make_block_picking_env_cfg(
         "container_name": "container",
       },
     ),
-    "action_rate_l2": RewardTermCfg(func=mdp_rewards.action_rate_l2, weight=-0.01),
+    # Light action-rate penalty (0.1x the usual -0.01): just enough to discourage
+    # jitter without taxing the fast actions grasp-discovery needs. Kept on at all
+    # DR levels (incl. dr0), unlike the other penalties' history.
+    "action_rate_l2": RewardTermCfg(func=mdp_rewards.action_rate_l2, weight=-0.001),
     "joint_pos_limits": RewardTermCfg(
       func=mdp_rewards.joint_pos_limits,
       weight=-5.0,
@@ -481,19 +484,10 @@ def make_block_picking_env_cfg(
     ),
   }
 
-  # dr0 (grasp-discovery stage): drop the exploration-taxing penalties. Discovering
-  # the grasp needs large, fast actions and lots of contact, and these costs fight
-  # that early on. All re-enabled from dr1 onward (smoother actions, no container
-  # knocking / table jamming) once the grasp is learned.
-  if order < 1:
-    for _r in (
-      "action_rate_l2",
-      "joint_pos_limits",
-      "container_displacement",
-      "container_rotation",
-      "gripper_table_contact",
-    ):
-      rewards.pop(_r, None)
+  # All penalties are active at every DR level (including dr0). Earlier we dropped
+  # them at dr0 to free grasp discovery, but that left dr0 too sloppy to convert
+  # grasps into deposits — so they're back on. action_rate_l2 stays but at 0.1x
+  # weight (see its RewardTermCfg) so it doesn't choke early exploration.
 
   terminations = {
     "time_out": TerminationTermCfg(func=mdp_term.time_out, time_out=True),
