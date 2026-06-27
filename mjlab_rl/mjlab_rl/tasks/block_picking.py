@@ -484,10 +484,15 @@ def make_block_picking_env_cfg(
     ),
   }
 
-  # All penalties are active at every DR level (including dr0). Earlier we dropped
-  # them at dr0 to free grasp discovery, but that left dr0 too sloppy to convert
-  # grasps into deposits — so they're back on. action_rate_l2 stays but at 0.1x
-  # weight (see its RewardTermCfg) so it doesn't choke early exploration.
+  # dr0 (grasp discovery): drop ONLY the two penalties that fight reaching down to
+  # the block on the table — gripper_table_contact (-5/step the moment the gripper
+  # nears the surface) and joint_pos_limits. With them on at dr0 the policy learns
+  # to stay away from the table and never grasps (observed regression). The
+  # container penalties + the light action_rate_l2 (0.1x) stay on at dr0; all
+  # penalties are on from dr1 to clean up deposits.
+  if order < 1:
+    for _r in ("gripper_table_contact", "joint_pos_limits"):
+      rewards.pop(_r, None)
 
   terminations = {
     "time_out": TerminationTermCfg(func=mdp_term.time_out, time_out=True),
