@@ -16,9 +16,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import torch
+import torch.nn.functional as F
 
 from mjlab.entity import Entity
+from mjlab.managers.event_manager import requires_model_fields
 from mjlab.managers.scene_entity_config import SceneEntityCfg
+from mjlab.tasks.manipulation.mdp import camera_rgb
+from mjlab.utils.lab_api.math import matrix_from_quat
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -27,6 +31,131 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # Observations.
 # ---------------------------------------------------------------------------
+
+
+def _gaussian_kernel2d(sigma: float, device: torch.device) -> torch.Tensor:
+  """Normalized 2-D Gaussian kernel, shape ``(1, 1, k, k)``."""
+  radius = max(1, int(round(3.0 * sigma)))
+  x = torch.arange(-radius, radius + 1, device=device, dtype=torch.float32)
+  g = torch.exp(-(x**2) / (2.0 * sigma * sigma))
+  g = g / g.sum()
+  k = torch.outer(g, g)
+  return k.view(1, 1, k.shape[0], k.shape[1])
+
+
+def _batched_gaussian_blur(img: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
+  """Per-sample Gaussian blur. ``img`` is ``(B, C, H, W)``; ``sigma`` is ``(B,)``
+  in pixels. Sigmas are quantized to 0.5-px buckets and each non-zero bucket is
+  blurred as one batched depthwise conv (cheap, fully on-GPU)."""
+  b, c, _, _ = img.shape
+  q = torch.round(sigma / 0.5).long().clamp(0, 8)  # 0..8 -> sigma 0..4.0 px
+  out = img.clone()
+  for bucket in torch.unique(q):
+    lvl = int(bucket.item())
+    if lvl == 0:
+      continue
+    sel = q == bucket
+    s = lvl * 0.5
+    kernel = _gaussian_kernel2d(s, img.device)
+    ks = kernel.shape[-1]
+    weight = kernel.expand(c, 1, ks, ks)
+    out[sel] = F.conv2d(img[sel], weight, padding=ks // 2, groups=c)
+  return out
+
+
+def camera_rgb_aug(
+  env: "ManagerBasedRlEnv",
+  sensor_name: str,
+  blur_strength: float = 0.0,
+  noise_std: float = 0.0,
+  brightness: float = 0.0,
+  contrast: float = 0.0,
+  glare_prob: float = 0.0,
+  glare_intensity: float = 0.0,
+  motion_ref: float = 5.0,
+  robot_name: str = "robot",
+) -> torch.Tensor:
+  """:func:`mjlab.tasks.manipulation.mdp.camera_rgb` plus sim-to-real image
+  augmentation, preserving shape/dtype/range ``(B, 3, H, W)`` float in ``[0, 1]``.
+
+  * **Motion blur** — Gaussian blur whose per-env sigma scales with the arm's
+    joint-motion magnitude (``sum |joint_vel|`` normalized by ``motion_ref``)
+    up to ``blur_strength`` px, mimicking the real camera smearing while the
+    robot moves. ``joint_vel`` is read only to *size* the blur; it is not
+    exposed in the observation.
+  * **Brightness/contrast** — per-env scalar gain+offset of magnitude
+    ``contrast``/``brightness``.
+  * **Specular glare** — with prob ``glare_prob`` per env, add a bright Gaussian
+    hot-spot (white, intensity up to ``glare_intensity``) at a random location.
+    The warp camera renderer ignores material specular/shininess/reflectance, so
+    the real table's glare never appears from the scene — this fakes it.
+  * **Pixel noise** — additive Gaussian with std ``noise_std``.
+
+  All strengths default to 0 → an identity wrapper of ``camera_rgb`` (used below
+  ``dr_level="dr2"``)."""
+  rgb = camera_rgb(env, sensor_name)  # (B, 3, H, W) float [0, 1]
+  if (
+    blur_strength <= 0
+    and noise_std <= 0
+    and brightness <= 0
+    and contrast <= 0
+    and glare_prob <= 0
+  ):
+    return rgb
+
+  b = rgb.shape[0]
+  dev = rgb.device
+
+  if blur_strength > 0:
+    vel = env.scene[robot_name].data.joint_vel  # (B, nj)
+    motion = vel.abs().sum(dim=-1)  # (B,)
+    frac = (motion / motion_ref).clamp(0.0, 1.0)
+    # Small random floor so some frames blur even when nearly still.
+    frac = torch.maximum(frac, torch.rand(b, device=dev) * 0.3)
+    rgb = _batched_gaussian_blur(rgb, frac * blur_strength)
+
+  if contrast > 0:
+    gain = 1.0 + (torch.rand(b, 1, 1, 1, device=dev) * 2 - 1) * contrast
+    mean = rgb.mean(dim=(-1, -2), keepdim=True)
+    rgb = (rgb - mean) * gain + mean
+  if brightness > 0:
+    rgb = rgb + (torch.rand(b, 1, 1, 1, device=dev) * 2 - 1) * brightness
+  if glare_prob > 0 and glare_intensity > 0:
+    rgb = _add_specular_glare(rgb, glare_prob, glare_intensity)
+  if noise_std > 0:
+    rgb = rgb + torch.randn_like(rgb) * noise_std
+
+  return rgb.clamp(0.0, 1.0)
+
+
+def _add_specular_glare(
+  img: torch.Tensor, prob: float, max_intensity: float
+) -> torch.Tensor:
+  """Add a white Gaussian hot-spot (specular table glare) to a random subset of
+  the batch (``prob``), at a random location with random size + intensity. The
+  glare is masked to the **table surface** so it doesn't wash out the block,
+  container, or gripper: the table is low-chroma (gray) while those objects are
+  saturated, so we weight the blob by a "grayness" mask. ``img`` is ``(B, C, H,
+  W)`` in ``[0, 1]``; returns the same shape (un-clamped — the caller clamps)."""
+  b, _, h, w = img.shape
+  dev = img.device
+  on = (torch.rand(b, device=dev) < prob).float()  # (B,)
+  cy = torch.rand(b, device=dev) * h
+  cx = torch.rand(b, device=dev) * w
+  sigma = (0.25 + torch.rand(b, device=dev) * 0.30) * h  # 25-55% of height
+  inten = torch.rand(b, device=dev) * max_intensity
+  yy = torch.arange(h, device=dev, dtype=torch.float32).view(1, h, 1)
+  xx = torch.arange(w, device=dev, dtype=torch.float32).view(1, 1, w)
+  d2 = (yy - cy.view(b, 1, 1)) ** 2 + (xx - cx.view(b, 1, 1)) ** 2  # (B, H, W)
+  blob = (inten * on).view(b, 1, 1) * torch.exp(
+    -d2 / (2.0 * sigma.view(b, 1, 1) ** 2)
+  )
+  # Table mask: chroma = max-min over channels. Gray table → ~0 (keep glare);
+  # salmon block / green container / colored bits → high (suppress glare). Soft
+  # ramp so there's no hard edge: full glare at chroma 0, none by chroma 0.15.
+  chroma = img.max(dim=1).values - img.min(dim=1).values  # (B, H, W)
+  table_mask = (1.0 - chroma / 0.15).clamp(0.0, 1.0)
+  return img + (blob * table_mask).unsqueeze(1)  # white glare, table only
 
 
 def ee_to_block(
@@ -104,15 +233,28 @@ def place_block_reward(
   std: float = 0.10,
   block_name: str = "block",
   container_name: str = "container",
+  lift_height: float = 0.03,
 ) -> torch.Tensor:
-  """Gaussian reward on block→container distance, gated by lift."""
+  """Gaussian reward on block→container distance, **gated by lift**.
+
+  The gaussian is scaled by a lift ramp ``clamp((z - z0) / lift_height, 0, 1)``
+  so the reward is zero while the block is still on the table and only ramps in
+  as it is lifted (full by ``lift_height`` above its start). Without this gate
+  the policy can farm the place reward by *sliding* the block across the table
+  toward the container instead of picking it up.
+  """
   block: Entity = env.scene[block_name]
   container: Entity = env.scene[container_name]
   container_site_pos = container.data.site_pos_w[:, 0]
   d2 = torch.sum(
     (block.data.root_link_pos_w - container_site_pos) ** 2, dim=-1
   )
-  return torch.exp(-d2 / (std**2))
+  gaussian = torch.exp(-d2 / (std**2))
+
+  initial_z = block.data.default_root_state[:, 2]
+  current_z = block.data.root_link_pos_w[:, 2]
+  lift_frac = ((current_z - initial_z) / lift_height).clamp(0.0, 1.0)
+  return gaussian * lift_frac
 
 
 def gripper_open_above_cup_bonus(
@@ -388,6 +530,45 @@ _container_init_xy: dict[int, torch.Tensor] = {}
 _container_init_quat: dict[int, torch.Tensor] = {}
 
 
+def swap_block_container_xy(
+  env: "ManagerBasedRlEnv",
+  env_ids: torch.Tensor | None,
+  p: float = 0.5,
+  block_name: str = "block",
+  container_name: str = "container",
+) -> None:
+  """Reset-mode event: with probability ``p`` per env, swap the block's and
+  container's XY positions (each keeps its own Z and orientation).
+
+  The block normally spawns on the +y side of the workspace and the container on
+  the -y side; swapping puts them on either side so the policy can't assume a
+  fixed "container is toward -y" layout. Must be ordered AFTER reset_block_pose /
+  reset_container_pose and BEFORE snapshot_container_xy (the snapshot must record
+  the post-swap container XY).
+  """
+  env.sim.forward()  # refresh root caches against the freshly-written reset state
+
+  if env_ids is None:
+    env_ids = torch.arange(env.num_envs, device=env.device)
+  env_ids = env_ids.to(env.device)
+
+  block: Entity = env.scene[block_name]
+  container: Entity = env.scene[container_name]
+
+  b_pos = block.data.root_link_pos_w[env_ids].clone()
+  b_quat = block.data.root_link_quat_w[env_ids].clone()
+  c_pos = container.data.root_link_pos_w[env_ids].clone()
+  c_quat = container.data.root_link_quat_w[env_ids].clone()
+
+  sel = torch.rand(env_ids.shape[0], device=env.device) < p
+  nb_pos, nc_pos = b_pos.clone(), c_pos.clone()
+  nb_pos[sel, :2] = c_pos[sel, :2]  # block takes container's XY
+  nc_pos[sel, :2] = b_pos[sel, :2]  # container takes block's XY
+
+  block.write_root_link_pose_to_sim(torch.cat([nb_pos, b_quat], dim=-1), env_ids)
+  container.write_root_link_pose_to_sim(torch.cat([nc_pos, c_quat], dim=-1), env_ids)
+
+
 def snapshot_container_xy(
   env: "ManagerBasedRlEnv",
   env_ids: torch.Tensor | None,
@@ -529,6 +710,133 @@ def randomize_light_active(
     new_active[torch.randint(0, num_lights, (1,)).item()] = True
 
   light_active[0] = new_active
+
+
+@requires_model_fields("cam_pos")
+def randomize_cam_pos_in_image_plane(
+  env: "ManagerBasedRlEnv",
+  env_ids: torch.Tensor | None,
+  camera_name: str,
+  u_range: tuple[float, float] = (0.0, 0.0),
+  v_range: tuple[float, float] = (0.0, 0.0),
+) -> None:
+  """Reset-mode event: offset a camera within its own image plane (local x/y),
+  leaving the optical axis (local z = depth) fixed.
+
+  ``dr.cam_pos`` perturbs ``cam_pos`` in the *parent-body* frame, which only
+  coincides with the image plane when the optical axis is a parent axis — true
+  for the straight-down top cam, but not the tilted wrist cam. Here we build the
+  camera's local x/y axes from its default orientation and add a sampled 2-D
+  offset along them, so depth never changes regardless of mounting tilt.
+
+  ``u_range`` / ``v_range`` are offsets (m) along the camera's local x and y.
+
+  The default pose comes from ``sim.get_default_field`` (the compile-time value,
+  captured once and cached) — NOT a fresh read of ``mj_model``. The viewer
+  overwrites ``mj_model.cam_pos`` every frame with the randomized per-world pose
+  (``cam_pos`` is in ``VIEWER_MODEL_FIELDS``); reading it back each reset would
+  treat the last randomized pose as the new baseline and accumulate, drifting
+  the camera away over episodes.
+  """
+  cam_id = env.sim.mj_model.camera(camera_name).id
+
+  if env_ids is None:
+    env_ids = torch.arange(env.num_envs, device=env.device)
+  env_ids = env_ids.to(env.device)
+  n = int(env_ids.shape[0])
+
+  default_pos = env.sim.get_default_field("cam_pos")[cam_id].to(env.device, torch.float32)
+  default_quat = env.sim.get_default_field("cam_quat")[cam_id].to(env.device, torch.float32)
+  # Columns of the rotation matrix are the camera's local axes in the parent
+  # frame; [:, 0] = local x, [:, 1] = local y (image plane), [:, 2] = depth.
+  rot = matrix_from_quat(default_quat.unsqueeze(0))[0]
+  x_axis, y_axis = rot[:, 0], rot[:, 1]
+
+  du = torch.empty(n, device=env.device).uniform_(u_range[0], u_range[1])
+  dv = torch.empty(n, device=env.device).uniform_(v_range[0], v_range[1])
+  offset = du.unsqueeze(-1) * x_axis + dv.unsqueeze(-1) * y_axis  # (n, 3)
+  env.sim.model.cam_pos[env_ids, cam_id] = default_pos + offset
+
+
+def randomize_action_gains(
+  env: "ManagerBasedRlEnv",
+  env_ids: torch.Tensor | None,
+  action_name: str = "joint_pos",
+  scale_range: tuple[float, float] = (0.7, 1.3),
+  max_rel_range: tuple[float, float] = (0.7, 1.3),
+) -> None:
+  """Reset-mode event: per-episode, per-joint multiplicative randomization of
+  the joint-position action's ``scale`` and ``max_relative_target`` around their
+  nominal (cfg) values.
+
+  Makes the policy robust to actuator-gain and per-step-speed uncertainty on the
+  real arm (the policy can't assume its action maps to exactly the sim scale /
+  rate limit). Scale and rate limit are sampled independently per joint.
+
+  The nominal tensors are snapshotted on first call so repeated resets don't
+  compound. Only added to the *training* env (see block_picking.py); the play /
+  exported policy uses the nominal values, which is what the deployment node and
+  the embedded .jit metadata carry.
+  """
+  term = env.action_manager.get_term(action_name)
+  if not isinstance(term._scale, torch.Tensor) or not isinstance(term._max_rel, torch.Tensor):
+    # Only per-joint (dict-configured) scale/max_rel can be randomized per env.
+    return
+
+  if env_ids is None:
+    env_ids = torch.arange(env.num_envs, device=env.device)
+  env_ids = env_ids.to(env.device)
+
+  if not hasattr(term, "_nominal_scale"):
+    term._nominal_scale = term._scale.clone()
+    term._nominal_max_rel = term._max_rel.clone()
+
+  shape = (env_ids.shape[0], term.action_dim)
+  s_factor = torch.empty(shape, device=env.device).uniform_(scale_range[0], scale_range[1])
+  r_factor = torch.empty(shape, device=env.device).uniform_(max_rel_range[0], max_rel_range[1])
+  term._scale[env_ids] = term._nominal_scale[env_ids] * s_factor
+  term._max_rel[env_ids] = term._nominal_max_rel[env_ids] * r_factor
+
+
+def randomize_actuator_lag(
+  env: "ManagerBasedRlEnv",
+  env_ids: torch.Tensor | None,
+  action_name: str = "joint_pos",
+  alpha_range: tuple[float, float] = (0.5, 1.0),
+  lag_range: tuple[int, int] = (0, 6),
+) -> None:
+  """Reset-mode event: per-episode servo-lag DR for **all joints**.
+
+  Sets the :class:`RateLimitedJointPositionAction`'s servo-realism state so the
+  simulated arm tracks targets with the finite bandwidth + latency of the real
+  STS-3215 servos (the sim arm otherwise reaches targets almost instantly):
+
+  * ``_lpf_alpha`` — per-(env, joint) first-order low-pass coefficient sampled in
+    ``alpha_range`` (1.0 = instant, lower = slower). Every joint, including the
+    gripper, gets an independent value.
+  * ``_action_lag`` — per-env integer transport delay in physics substeps sampled
+    in ``lag_range`` (whole-arm latency).
+
+  Only added to the *training* env at the full DR level (see block_picking.py);
+  play / export use the inert defaults (alpha 1, lag 0), so this changes sim
+  dynamics only — never the exported action contract."""
+  term = env.action_manager.get_term(action_name)
+  if not hasattr(term, "_lpf_alpha"):
+    return
+
+  if env_ids is None:
+    env_ids = torch.arange(env.num_envs, device=env.device)
+  env_ids = env_ids.to(env.device)
+
+  shape = (env_ids.shape[0], term.action_dim)
+  term._lpf_alpha[env_ids] = torch.empty(shape, device=env.device).uniform_(
+    alpha_range[0], alpha_range[1]
+  )
+  if getattr(term, "_action_lag", None) is not None:
+    lo, hi = int(lag_range[0]), int(lag_range[1])
+    term._action_lag[env_ids] = torch.randint(
+      lo, hi + 1, (env_ids.shape[0],), device=env.device
+    )
 
 
 def block_dropped(

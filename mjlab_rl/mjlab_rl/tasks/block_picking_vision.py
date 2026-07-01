@@ -19,21 +19,27 @@ Same env as ``Mjlab-SO101-Block-Picking``, but:
 
 from __future__ import annotations
 
+import math
+
+from mjlab.envs.mdp import dr
+from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.observation_manager import (
   ObservationGroupCfg,
   ObservationTermCfg,
 )
+from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.rl import (
   RslRlModelCfg,
   RslRlOnPolicyRunnerCfg,
   RslRlPpoAlgorithmCfg,
 )
 from mjlab.sensor import CameraSensorCfg
-from mjlab.tasks.manipulation import mdp as manipulation_mdp
 from mjlab.tasks.manipulation.rl import ManipulationOnPolicyRunner
 from mjlab.tasks.registry import register_mjlab_task
 
+from mjlab_rl.envs import mdp as task_mdp
 from mjlab_rl.tasks.block_picking import (
+  DR_ORDER,
   make_block_picking_env_cfg,
   make_block_picking_ppo_cfg,
 )
@@ -61,8 +67,9 @@ _CNN_CLASS = "mjlab.rl.spatial_softmax:SpatialSoftmaxCNNModel"
 # ----------------------------------------------------------------------------
 
 
-def make_block_picking_vision_env_cfg(play: bool = False):
-  cfg = make_block_picking_env_cfg(play=play)
+def make_block_picking_vision_env_cfg(play: bool = False, dr_level: str = "dr3"):
+  order = DR_ORDER[dr_level]
+  cfg = make_block_picking_env_cfg(play=play, dr_level=dr_level)
 
   # --- Cameras ----------------------------------------------------------
   shared = dict(
@@ -80,7 +87,12 @@ def make_block_picking_vision_env_cfg(play: bool = False):
     # debug tool.
     enabled_geom_groups=(0, 2),
     use_textures=True,
-    use_shadows=False,
+    # mujoco-warp ray-traces shadows (hard-edged / directional; the OpenGL
+    # shadowsize/shadowscale knobs don't apply here). Off at dr0/dr1 so the grasp
+    # and color are learned against flat, shadow-free frames; ON from dr2 as part
+    # of the image-realism stage, so the policy sees cast shadows like the real
+    # bench. Adds GPU cost per camera per step.
+    use_shadows=(order >= 2),
   )
   wrist_cam = CameraSensorCfg(
     name="wrist_cam",
@@ -105,6 +117,73 @@ def make_block_picking_vision_env_cfg(play: bool = False):
   )
   cfg.scene.sensors = (cfg.scene.sensors or ()) + (wrist_cam, top_cam)
 
+  # --- Camera extrinsics randomization ----------------------------------
+  # Per-episode jitter of each camera's mount pose so the policy is robust to
+  # the real rig not matching the sim extrinsics exactly (a cause of the
+  # residual ee-placement error on hardware).
+  # Camera-pose jitter ramps across dr2->dr3 (half at dr2, full at dr3; none
+  # below dr2). "Full" = reduced ranges (top ±5°/±3 cm, wrist ±3°/±1.5 cm): the
+  # original ±15°/±10 cm is a large spatial image shift that collapsed the grasp,
+  # and is larger than realistic mounting error anyway. Introducing it at dr2
+  # alongside the image realism (rather than alone at dr3) gives a gentler ramp.
+  cam_frac = (order - 1) / 2.0 if order >= 2 else 0.0  # dr2 -> 0.5, dr3 -> 1.0
+  _WRIST_RPY = (-math.radians(3.0) * cam_frac, math.radians(3.0) * cam_frac)
+  _TOP_RPY = (-math.radians(5.0) * cam_frac, math.radians(5.0) * cam_frac)
+  _WRIST_UV = 0.015 * cam_frac
+  _TOP_POS = 0.03 * cam_frac
+
+  # Wrist cam ("robot/hand_eye"), rigidly bolted to the wrist. Position is
+  # jittered ONLY within its image plane (local x/y), NOT along the optical
+  # axis (depth) — its optical axis is tilted, so plain cam_pos can't isolate
+  # that. Full ±1.5 cm in-plane, ±3° orientation (× cam_frac).
+  cfg.events["wrist_cam_pos"] = EventTermCfg(
+    func=task_mdp.randomize_cam_pos_in_image_plane,
+    mode="reset",
+    params={
+      "camera_name": "robot/hand_eye",
+      "u_range": (-_WRIST_UV, _WRIST_UV),
+      "v_range": (-_WRIST_UV, _WRIST_UV),
+    },
+  )
+  cfg.events["wrist_cam_quat"] = EventTermCfg(
+    func=dr.cam_quat,
+    mode="reset",
+    params={
+      "asset_cfg": SceneEntityCfg("robot", camera_names=("hand_eye",)),
+      "roll_range": _WRIST_RPY,
+      "pitch_range": _WRIST_RPY,
+      "yaw_range": _WRIST_RPY,
+    },
+  )
+
+  # Top cam ("top_cam"), free-standing overhead rig. Full ±3 cm position offset
+  # (all axes) and ±5° orientation (× cam_frac), reduced from ±10 cm / ±15°.
+  cfg.events["top_cam_pos"] = EventTermCfg(
+    func=dr.cam_pos,
+    mode="reset",
+    params={
+      "asset_cfg": SceneEntityCfg("table", camera_names=("top_cam",)),
+      "ranges": (-_TOP_POS, _TOP_POS),
+      "operation": "add",
+    },
+  )
+  cfg.events["top_cam_quat"] = EventTermCfg(
+    func=dr.cam_quat,
+    mode="reset",
+    params={
+      "asset_cfg": SceneEntityCfg("table", camera_names=("top_cam",)),
+      "roll_range": _TOP_RPY,
+      "pitch_range": _TOP_RPY,
+      "yaw_range": _TOP_RPY,
+    },
+  )
+
+  # Camera-pose jitter active from dr2 (ramped via cam_frac). dr0/dr1 keep fixed
+  # cameras so the grasp and color are learned against a stable view first.
+  if order < 2:
+    for _k in ("wrist_cam_pos", "wrist_cam_quat", "top_cam_pos", "top_cam_quat"):
+      cfg.events.pop(_k, None)
+
   # --- Observations -----------------------------------------------------
   # Strip privileged distance terms from the actor; it must learn them
   # from pixels. Also drop joint_vel: lerobot's SOFollower.get_observation
@@ -120,14 +199,33 @@ def make_block_picking_vision_env_cfg(play: bool = False):
   # joint_vel — fine, the critic only runs in sim).
 
   # Camera group — concatenated along channel dim (6 = 2 cams × 3 RGB).
+  # Image realism (sim2real) from dr2: motion blur + pixel noise + brightness/
+  # contrast + specular glare via camera_rgb_aug, and camera latency via the obs
+  # term's built-in delay buffer. (Glare must be faked here because the warp
+  # camera renderer ignores material specular/shininess/reflectance — it only
+  # uses mat_rgba — so real specular hot-spots never appear from the scene.) At
+  # dr0/dr1 the aug params are 0 (identity wrapper of camera_rgb), no delay.
+  img_aug = order >= 2
+  aug_params = dict(
+    blur_strength=2.0 if img_aug else 0.0,  # max Gaussian sigma (px) at full motion
+    noise_std=0.02 if img_aug else 0.0,
+    brightness=0.10 if img_aug else 0.0,
+    contrast=0.10 if img_aug else 0.0,
+    glare_prob=0.5 if img_aug else 0.0,      # fraction of frames with a glare blob
+    glare_intensity=1.5 if img_aug else 0.0,  # max added brightness at blob center
+                                              # (>1 saturates a solid white core)
+  )
+  cam_lag = 1 if img_aug else 0  # camera latency, control steps (0-20 ms)
   cam_terms = {
     "wrist_rgb": ObservationTermCfg(
-      func=manipulation_mdp.camera_rgb,
-      params={"sensor_name": "wrist_cam"},
+      func=task_mdp.camera_rgb_aug,
+      params={"sensor_name": "wrist_cam", **aug_params},
+      delay_max_lag=cam_lag,
     ),
     "top_rgb": ObservationTermCfg(
-      func=manipulation_mdp.camera_rgb,
-      params={"sensor_name": "top_cam"},
+      func=task_mdp.camera_rgb_aug,
+      params={"sensor_name": "top_cam", **aug_params},
+      delay_max_lag=cam_lag,
     ),
   }
   cfg.observations["camera"] = ObservationGroupCfg(
@@ -145,7 +243,7 @@ def make_block_picking_vision_env_cfg(play: bool = False):
 # ----------------------------------------------------------------------------
 
 
-def make_block_picking_vision_ppo_cfg() -> RslRlOnPolicyRunnerCfg:
+def make_block_picking_vision_ppo_cfg(run_name: str = "") -> RslRlOnPolicyRunnerCfg:
   base = make_block_picking_ppo_cfg()
   return RslRlOnPolicyRunnerCfg(
     actor=RslRlModelCfg(
@@ -185,7 +283,10 @@ def make_block_picking_vision_ppo_cfg() -> RslRlOnPolicyRunnerCfg:
       max_grad_norm=1.0,
     ),
     experiment_name="so101_block_picking_vision",
-    save_interval=100,
+    # Appended to the run dir (<timestamp>_<run_name>) to tag the DR level while
+    # keeping one shared experiment_name so curriculum resumes find prior runs.
+    run_name=run_name,
+    save_interval=1000,
     num_steps_per_env=base.num_steps_per_env,
     max_iterations=10_000,  # vision needs more iters
   )
@@ -196,10 +297,29 @@ def make_block_picking_vision_ppo_cfg() -> RslRlOnPolicyRunnerCfg:
 # ----------------------------------------------------------------------------
 
 
-register_mjlab_task(
-  task_id="Mjlab-SO101-Block-Picking-Rgb",
-  env_cfg=make_block_picking_vision_env_cfg(),
-  play_env_cfg=make_block_picking_vision_env_cfg(play=True),
-  rl_cfg=make_block_picking_vision_ppo_cfg(),
-  runner_cls=ManipulationOnPolicyRunner,
-)
+# 4-level curriculum, all sharing one experiment_name ("so101_block_picking_vision")
+# so each stage's resume finds the prior run; run_name tags the run dir
+# (<timestamp>_dr<level>):
+#   DR0 : non-visual DR only (servo lag, encoder bias, wide ±0.3 starts) — vivid
+#         pink, fixed cameras, sharp images.
+#   DR1 : + block/table color.
+#   DR2 : + image motion blur/noise/brightness + camera/proprioception latency
+#         + camera-pose jitter @ 1/2 (±2.5°/±1.5 cm).
+#   DR3 : + camera-pose jitter @ full (±5°/±3 cm). Jitter ramps 1/2->full dr2-3.
+# The bare ``Mjlab-SO101-Block-Picking-Rgb`` is kept as the default/full (= DR3)
+# task id for standalone tooling (export, deploy, play-zero, render).
+_BLOCK_PICKING_RGB_LEVELS = {
+  "Mjlab-SO101-Block-Picking-Rgb": "dr3",
+  "Mjlab-SO101-Block-Picking-Rgb-DR0": "dr0",
+  "Mjlab-SO101-Block-Picking-Rgb-DR1": "dr1",
+  "Mjlab-SO101-Block-Picking-Rgb-DR2": "dr2",
+  "Mjlab-SO101-Block-Picking-Rgb-DR3": "dr3",
+}
+for _task_id, _lvl in _BLOCK_PICKING_RGB_LEVELS.items():
+  register_mjlab_task(
+    task_id=_task_id,
+    env_cfg=make_block_picking_vision_env_cfg(dr_level=_lvl),
+    play_env_cfg=make_block_picking_vision_env_cfg(play=True, dr_level=_lvl),
+    rl_cfg=make_block_picking_vision_ppo_cfg(run_name=_lvl),
+    runner_cls=ManipulationOnPolicyRunner,
+  )

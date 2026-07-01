@@ -62,6 +62,19 @@ SO101_ACTION_SCALE: dict[str, float] = {
   "gripper": 0.8,
 }
 
+# Per-env-step (20 ms at decimation=4, timestep=0.005) max delta from the
+# present joint position. Mirrors lerobot's SOFollower send_action safety
+# clamp. Used both by the env's RateLimitedJointPositionAction at training
+# time and by the deployment-side rate limiter at inference.
+SO101_MAX_RELATIVE_TARGET: dict[str, float] = {
+  "shoulder_pan": 0.1,
+  "shoulder_lift": 0.1,
+  "elbow_flex": 0.1,
+  "wrist_flex": 0.1,
+  "wrist_roll": 0.1,
+  "gripper": 0.3,
+}
+
 
 def _strip_world_floor(spec: mujoco.MjSpec) -> None:
   """Remove the placeholder floor geom the SO-101 XML drops into the world."""

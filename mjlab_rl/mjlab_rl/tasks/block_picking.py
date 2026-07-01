@@ -12,6 +12,7 @@ import math
 
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp import actions as mdp_actions  # noqa: F401  (kept for compat)
+from mjlab.envs.mdp import dr
 from mjlab.envs.mdp import events as mdp_events
 from mjlab.envs.mdp import observations as mdp_obs
 from mjlab.envs.mdp import rewards as mdp_rewards
@@ -41,6 +42,7 @@ from mjlab.viewer import ViewerConfig
 
 from mjlab_rl.assets import (
   SO101_ACTION_SCALE,
+  SO101_MAX_RELATIVE_TARGET,
   TABLE_TOP_Z,
   get_block_cfg,
   get_container_cfg,
@@ -49,6 +51,27 @@ from mjlab_rl.assets import (
 )
 from mjlab_rl.envs import mdp as task_mdp
 from mjlab_rl.envs.actions import RateLimitedJointPositionActionCfg
+
+# Domain-randomization curriculum. Vision-based grasping of a 2 cm block is a
+# fragile exploration bottleneck: *visual* DR that adds noise during exploration
+# tips the policy into the easy reach-only optimum, and adding too much visual DR
+# at once *after* grasping is learned collapses the grasp at the resume boundary.
+# So ramp only the VISUAL DR, one kind per stage, each a task id sharing one
+# experiment_name (so resume finds the prior run):
+#
+#   dr_level="dr0" : non-visual DR only (servo lag, encoder bias, wide +/-0.3
+#                    starts) — these don't corrupt the camera image, so the grasp
+#                    can be learned robust to them with a clean camera (vivid-pink
+#                    block, sharp images, fixed cameras). Learn the grasp here.
+#   dr_level="dr1" : + block/table color (spanning pink<->salmon, no visual cliff).
+#   dr_level="dr2" : + image realism (motion blur, pixel noise, brightness/
+#                    contrast) + camera/proprioception obs latency + camera-pose
+#                    jitter @ 1/2.
+#   dr_level="dr3" : + camera-pose jitter @ full (the full deploy setup). Camera
+#                    jitter ramps 1/2->full across dr2-3 (gated/scaled in
+#                    block_picking_vision.py) to avoid a sudden visual shock.
+#
+# Workflow: train dr0 -> resume dr1 -> resume dr2 -> resume dr3.
 
 # ----------------------------------------------------------------------------
 # Geometry / randomization ranges. All numbers are in meters / radians.
@@ -63,14 +86,14 @@ from mjlab_rl.envs.actions import RateLimitedJointPositionActionCfg
 # The whole region sits within the SO-101's ~0.35 m reach from base
 # (-0.4, 0.25, 0.825), with the arm pointing in world -y.
 BLOCK_XY_RANGE = {
-  "x": (-0.10, 0.10),    # default x = -0.40 → [-0.50, -0.30]
-  "y": (-0.075, 0.075),  # default y = 0.075 → [0.00, 0.15]
+  "x": (-0.15, 0.10),    # default x = -0.40 → [-0.55, -0.30]
+  "y": (-0.12, 0.12),    # default y = 0.075 → [-0.045, 0.195]
   "yaw": (-math.pi, math.pi),  # full random yaw — block is 4.5×2×2 cm
                                 # so the policy must learn any orientation
 }
 CONTAINER_XY_RANGE = {
   "x": (-0.075, 0.075),  # default x = -0.375 → [-0.45, -0.30]
-  "y": (-0.075, 0.075),  # default y = -0.125 → [-0.20, -0.05]
+  "y": (-0.12, 0.12),    # default y = -0.125 → [-0.245, -0.005]
 }
 
 
@@ -79,13 +102,35 @@ CONTAINER_XY_RANGE = {
 # ----------------------------------------------------------------------------
 
 
-def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+DR_ORDER = {"dr0": 0, "dr1": 1, "dr2": 2, "dr3": 3}
+
+
+def make_block_picking_env_cfg(
+  play: bool = False, dr_level: str = "dr3"
+) -> ManagerBasedRlEnvCfg:
+  assert dr_level in DR_ORDER, dr_level
+  order = DR_ORDER[dr_level]
+  # 4-level curriculum. Only the *visual* DR is ramped, since vision-based grasp
+  # exploration is the fragile part:
+  #   color_dr (dr1+)     : block/table color.
+  #   image_dr (dr2+)     : image motion blur/noise/brightness + obs latency.
+  #   camera-pose jitter  : dr2-dr3, ramped 1/2->full (in block_picking_vision.py).
+  # The *non-visual* DR (servo lag, encoder bias, wide ±0.3 arm starts) is ON at
+  # ALL levels including dr0 — it doesn't corrupt the camera image, so it doesn't
+  # tip the policy into the reach-only optimum during early grasp learning, and
+  # the policy learns to grasp robust to it from the start.
+  color_dr = order >= 1
+  image_dr = order >= 2
+
   robot_cfg = SceneEntityCfg("robot", site_names=("gripperframe",))
 
   actor_terms = {
     "joint_pos": ObservationTermCfg(
       func=mdp_obs.joint_pos_rel,
       noise=Unoise(n_min=-0.01, n_max=0.01),
+      # Proprioception latency (sim2real): the real arm reports Present_Position
+      # with a small lag. 0-1 control steps (0-20 ms) at dr2+, none below.
+      delay_max_lag=1 if image_dr else 0,
     ),
     "joint_vel": ObservationTermCfg(
       func=mdp_obs.joint_vel_rel,
@@ -122,18 +167,13 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       actuator_names=(".*",),
       scale=SO101_ACTION_SCALE,
       use_default_offset=True,
-      # Per-step (env-step = 20 ms at decimation=4, timestep=0.005) max delta
-      # from the present joint position. Mirrors lerobot's SOFollower
-      # send_action safety clamp. 0.1 rad/step ≈ 5 rad/s, in line with what
-      # the real STS-3215 servos can comfortably do.
-      max_relative_target={
-        "shoulder_pan": 0.1,
-        "shoulder_lift": 0.1,
-        "elbow_flex": 0.1,
-        "wrist_flex": 0.1,
-        "wrist_roll": 0.1,
-        "gripper": 0.3,  # gripper snaps faster
-      },
+      # 0.1 rad/step ≈ 5 rad/s, in line with what the real STS-3215 servos
+      # can comfortably do; gripper snaps faster.
+      max_relative_target=SO101_MAX_RELATIVE_TARGET,
+      # Servo-realism delay-buffer capacity in physics substeps (5 ms each).
+      # Inert (lag 0, low-pass alpha 1) unless randomize_actuator_lag (full DR)
+      # turns it on per-episode, so none/soft behavior is unchanged.
+      max_action_lag=6,
     ),
   }
 
@@ -161,13 +201,49 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         "asset_cfg": SceneEntityCfg("robot"),
       },
     ),
+    # Randomize the arm's starting configuration each episode (offset from the
+    # home pose, clamped to soft joint limits). Was ±0.02 rad (tiny, ~home
+    # only); widened to ±0.3 rad (~17°/joint) so the policy learns to pick from
+    # a spread of configurations rather than a single home-launched trajectory.
+    # On the real arm small drift pushes it into states a home-only start
+    # distribution never covered, where it would "give up" and return home;
+    # training from varied starts keeps those states in-distribution.
     "reset_robot_joints": EventTermCfg(
       func=mdp_events.reset_joints_by_offset,
       mode="reset",
       params={
-        "position_range": (-0.02, 0.02),
+        # Wide ±0.3 at all levels (non-visual): the policy learns to grasp from
+        # varied start configs from dr0; it doesn't disturb vision exploration.
+        "position_range": (-0.3, 0.3),
         "velocity_range": (0.0, 0.0),
         "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
+      },
+    ),
+    # Randomize the gripper's starting opening across its FULL range (fully
+    # closed ↔ fully open) every episode, so the policy is robust to whatever
+    # state the real gripper happens to start in. Offset is from the home value
+    # (0.0), so this range is absolute; clamped to the joint's soft limits. Runs
+    # after reset_robot_joints (which also nudges the gripper) and overrides it.
+    "reset_gripper_home": EventTermCfg(
+      func=mdp_events.reset_joints_by_offset,
+      mode="reset",
+      params={
+        "position_range": (-0.17, 1.745),  # gripper joint range, closed→open
+        "velocity_range": (0.0, 0.0),
+        "asset_cfg": SceneEntityCfg("robot", joint_names=("gripper",)),
+      },
+    ),
+    # Per-episode joint encoder calibration offset. This bias is *unobservable*
+    # to the policy (the action target is shifted by it via
+    # RateLimitedJointPositionAction), so training forces robustness to the real
+    # arm's calibration error — the residual ~1-3 cm ee misplacement seen on
+    # hardware. ±5° per joint.
+    "encoder_bias": EventTermCfg(
+      func=dr.encoder_bias,
+      mode="reset",
+      params={
+        "asset_cfg": SceneEntityCfg("robot"),
+        "bias_range": (-math.radians(5.0), math.radians(5.0)),
       },
     ),
     "reset_block_pose": EventTermCfg(
@@ -188,8 +264,15 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         "asset_cfg": SceneEntityCfg("container"),
       },
     ),
-    # Must run AFTER reset_container_pose so the snapshot captures the
-    # randomized position, not the un-randomized default.
+    # With p=0.5, swap the block↔container XY so the task layout isn't always
+    # "block on +y, container on -y". After both placements, before the snapshot.
+    "swap_block_container": EventTermCfg(
+      func=task_mdp.swap_block_container_xy,
+      mode="reset",
+      params={"p": 0.5, "block_name": "block", "container_name": "container"},
+    ),
+    # Must run AFTER reset_container_pose (and the swap) so the snapshot captures
+    # the final randomized position, not the un-randomized default.
     "snapshot_container_xy": EventTermCfg(
       func=task_mdp.snapshot_container_xy,
       mode="reset",
@@ -203,7 +286,58 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       mode="reset",
       params={"p_on": 0.6, "ensure_one_on": True},
     ),
+    # Per-episode block color spanning the full range from the vivid pink the
+    # dr0 phase trained on (1.0, 0.40, 0.70) to the real target's salmon
+    # (1.0, 0.72, 0.62). operation="abs" sets the color absolutely; the ranges
+    # cover BOTH endpoints (+ a little margin) so there is no visual cliff at the
+    # dr0->dr1 boundary — the policy still sees pink sometimes and adapts to
+    # salmon gradually, while staying robust to the deployment color.
+    "randomize_block_color": EventTermCfg(
+      func=dr.mat_rgba,
+      mode="reset",
+      params={
+        "asset_cfg": SceneEntityCfg("block", material_names=("block_mat",)),
+        "ranges": {0: (0.95, 1.0), 1: (0.38, 0.77), 2: (0.57, 0.72)},
+        "operation": "abs",
+        "axes": [0, 1, 2],  # RGB only; leave alpha opaque
+      },
+    ),
+    # Jitter the (dark-gray) table color per episode for sim2real robustness —
+    # deliberately NOT colorful. operation="add" perturbs the (0.12, 0.12, 0.13)
+    # base; the small asymmetric range keeps the surface a dark black-gray
+    # (channels land in ~[0.07, 0.27]) with slight brightness + tint noise.
+    "randomize_table_color": EventTermCfg(
+      func=dr.mat_rgba,
+      mode="reset",
+      params={
+        "asset_cfg": SceneEntityCfg("table", material_names=("table_mat",)),
+        "ranges": (-0.05, 0.15),  # per-channel offset added to the dark base
+        "operation": "add",
+        "axes": [0, 1, 2],  # RGB only; leave alpha opaque
+      },
+    ),
+    # Per-episode servo lag for ALL joints: per-joint low-pass (bandwidth) +
+    # per-env transport delay (latency), so the policy is robust to the real
+    # STS-3215 servos lagging the commanded target. Sim-dynamics only — does
+    # not change the exported action contract.
+    "randomize_actuator_lag": EventTermCfg(
+      func=task_mdp.randomize_actuator_lag,
+      mode="reset",
+      params={
+        "action_name": "joint_pos",
+        "alpha_range": (0.5, 1.0),  # per-substep low-pass coef (1.0 = instant)
+        "lag_range": (0, 6),        # transport delay in substeps (0-30 ms)
+      },
+    ),
   }
+
+  # Drop DR events not active at this curriculum level. Light randomization is
+  # cosmetic and left on at all levels. The wide-start range is gated above.
+  if not color_dr:  # dr0
+    events.pop("randomize_block_color", None)
+    events.pop("randomize_table_color", None)
+  # encoder_bias and randomize_actuator_lag are non-visual -> kept at every level
+  # (incl. dr0), alongside the wide arm-start range above.
 
   rewards = {
     "reach": RewardTermCfg(
@@ -213,7 +347,7 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     ),
     "lift": RewardTermCfg(
       func=task_mdp.lift_block_reward,
-      weight=2.0,
+      weight=4.0,
       params={"max_lift": 0.10, "block_name": "block"},
     ),
     "place": RewardTermCfg(
@@ -223,6 +357,9 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         "std": 0.10,
         "block_name": "block",
         "container_name": "container",
+        # Gate place on lift: zero while the block is on the table, full once
+        # it's ~3 cm up. Stops the policy farming place by sliding the block.
+        "lift_height": 0.03,
       },
     ),
     # Behavioral bonus: rewards the act of opening the gripper while the
@@ -310,7 +447,10 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         "container_name": "container",
       },
     ),
-    "action_rate_l2": RewardTermCfg(func=mdp_rewards.action_rate_l2, weight=-0.01),
+    # Light action-rate penalty (0.1x the usual -0.01): just enough to discourage
+    # jitter without taxing the fast actions grasp-discovery needs. Kept on at all
+    # DR levels (incl. dr0), unlike the other penalties' history.
+    "action_rate_l2": RewardTermCfg(func=mdp_rewards.action_rate_l2, weight=-0.001),
     "joint_pos_limits": RewardTermCfg(
       func=mdp_rewards.joint_pos_limits,
       weight=-5.0,
@@ -344,6 +484,16 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     ),
   }
 
+  # dr0 (grasp discovery): drop ONLY the two penalties that fight reaching down to
+  # the block on the table — gripper_table_contact (-5/step the moment the gripper
+  # nears the surface) and joint_pos_limits. With them on at dr0 the policy learns
+  # to stay away from the table and never grasps (observed regression). The
+  # container penalties + the light action_rate_l2 (0.1x) stay on at dr0; all
+  # penalties are on from dr1 to clean up deposits.
+  if order < 1:
+    for _r in ("gripper_table_contact", "joint_pos_limits"):
+      rewards.pop(_r, None)
+
   terminations = {
     "time_out": TerminationTermCfg(func=mdp_term.time_out, time_out=True),
     "block_dropped": TerminationTermCfg(
@@ -358,11 +508,22 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     "nan": TerminationTermCfg(func=mdp_term.nan_detection),
   }
 
-  # Override the model's auto-computed centroid so the viser orbit camera
-  # looks at the workspace instead of the bounding-box centroid of all
-  # geoms (which lands far off-axis with the walls/ceiling/posts present).
+  # Scene-wide visual tweaks applied to the merged spec right before compile
+  # (entity specs' own <visual> blocks are discarded by MjSpec.attach, so this
+  # callback is the only place global visual settings take effect).
   def _set_camera_lookat(spec: "mujoco.MjSpec") -> None:
+    # Override the model's auto-computed centroid so the viser orbit camera
+    # looks at the workspace instead of the bounding-box centroid of all
+    # geoms (which lands far off-axis with the walls/ceiling/posts present).
     spec.stat.center = (-0.394, 0.024, 0.853)
+    # Sharpen the OpenGL-viewer shadows. The base scene already uses an
+    # 8192-texel shadow map, but the default shadowscale=0.6 spreads it over
+    # the whole walled room, so workspace shadows look blurry. Shrinking the
+    # scale concentrates the same texture on the ~0.5 m workspace → crisp,
+    # directional shadow edges. (Viewer-only; mujoco-warp camera rendering
+    # ray-traces shadows and ignores these knobs.)
+    spec.visual.quality.shadowsize = 8192
+    spec.visual.map.shadowscale = 0.2
 
   gripper_table_contact_cfg = ContactSensorCfg(
     name="gripper_table_contact",
@@ -433,7 +594,7 @@ def make_block_picking_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 # ----------------------------------------------------------------------------
 
 
-def make_block_picking_ppo_cfg() -> RslRlOnPolicyRunnerCfg:
+def make_block_picking_ppo_cfg(run_name: str = "") -> RslRlOnPolicyRunnerCfg:
   return RslRlOnPolicyRunnerCfg(
     actor=RslRlModelCfg(
       hidden_dims=(256, 256, 128),
@@ -465,7 +626,11 @@ def make_block_picking_ppo_cfg() -> RslRlOnPolicyRunnerCfg:
       max_grad_norm=1.0,
     ),
     experiment_name="so101_block_picking",
-    save_interval=100,
+    # run_name is appended to the timestamped run dir (<timestamp>_<run_name>),
+    # labeling each run by its DR level while sharing one experiment_name so
+    # curriculum resumes still find the prior stage's run.
+    run_name=run_name,
+    save_interval=1000,
     num_steps_per_env=24,
     max_iterations=5_000,
   )
@@ -476,10 +641,29 @@ def make_block_picking_ppo_cfg() -> RslRlOnPolicyRunnerCfg:
 # ----------------------------------------------------------------------------
 
 
-register_mjlab_task(
-  task_id="Mjlab-SO101-Block-Picking",
-  env_cfg=make_block_picking_env_cfg(),
-  play_env_cfg=make_block_picking_env_cfg(play=True),
-  rl_cfg=make_block_picking_ppo_cfg(),
-  runner_cls=ManipulationOnPolicyRunner,
-)
+# 4-level curriculum (ramp DR0 -> DR1 -> DR2 -> DR3). Only VISUAL DR is ramped:
+#   DR0 = non-visual DR (servo lag, encoder bias, wide ±0.3 starts) + always-on
+#         start randomization; vivid-pink block, sharp images, fixed cameras.
+#   DR1 += block/table color.
+#   DR2 += image realism (blur/noise/brightness) + obs latency + camera-pose
+#          jitter @ 1/2 (vision task only).
+#   DR3 += camera-pose jitter @ full (vision task only). Jitter ramps 1/2->full
+#          across dr2-3; see block_picking_vision.py.
+# All share one experiment_name so each stage's resume finds the prior run;
+# run_name tags the run dir (<timestamp>_dr<level>). The bare
+# ``Mjlab-SO101-Block-Picking`` is the default/full (= DR3) id for tooling.
+_BLOCK_PICKING_LEVELS = {
+  "Mjlab-SO101-Block-Picking": "dr3",
+  "Mjlab-SO101-Block-Picking-DR0": "dr0",
+  "Mjlab-SO101-Block-Picking-DR1": "dr1",
+  "Mjlab-SO101-Block-Picking-DR2": "dr2",
+  "Mjlab-SO101-Block-Picking-DR3": "dr3",
+}
+for _task_id, _lvl in _BLOCK_PICKING_LEVELS.items():
+  register_mjlab_task(
+    task_id=_task_id,
+    env_cfg=make_block_picking_env_cfg(dr_level=_lvl),
+    play_env_cfg=make_block_picking_env_cfg(play=True, dr_level=_lvl),
+    rl_cfg=make_block_picking_ppo_cfg(run_name=_lvl),
+    runner_cls=ManipulationOnPolicyRunner,
+  )

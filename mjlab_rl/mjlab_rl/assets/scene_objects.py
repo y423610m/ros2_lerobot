@@ -11,7 +11,7 @@ from mjlab.entity import EntityCfg
 # Block dimensions (half-extents) and color.
 # 4.5 × 2 × 2 cm block.
 BLOCK_HALF_SIZE: tuple[float, float, float] = (0.0225, 0.01, 0.01)
-BLOCK_MASS: float = 0.05
+BLOCK_MASS: float = 0.015
 
 # Container visual mesh (rendered only — collision below uses primitive
 # boxes because MuJoCo Warp treats <geom type="mesh"> as the geom's convex
@@ -45,8 +45,14 @@ CONTAINER_DROP_SITE_Z: float = 0.10
 def _make_block_spec() -> mujoco.MjSpec:
   spec = mujoco.MjSpec()
   # Matte "sponge" material: no specular highlights, no mirror reflection.
-  # Color stays pink under any lighting (no white wash-out when multiple
+  # Color stays stable under any lighting (no white wash-out when multiple
   # randomized lights happen to align with the camera's reflection vector).
+  # Base color is VIVID pink — high-saturation, easy to localize in the 64x64
+  # camera frames. This is the color the no-DR curriculum phase trains on. With
+  # DR on, the ``randomize_block_color`` event (block_picking.py) repaints the
+  # block to the real target's salmon tone ± slight noise each episode, so the
+  # deployed policy is robust to the real block color without paying the
+  # localization cost during the fragile grasp-learning phase.
   spec.add_material(
     name="block_mat",
     rgba=(1.00, 0.40, 0.70, 1.0),
@@ -160,15 +166,17 @@ TABLE_HALF_SIZE: tuple[float, float, float] = (0.6, 0.275, 0.025)
 def _make_table_spec() -> mujoco.MjSpec:
   """Static, fixed-base, non-articulated table — gets replicated per env."""
   spec = mujoco.MjSpec()
-  # Matte black material for the table. Without an explicit material the
-  # default specular (0.5) makes the near-black surface pick up bright
-  # highlights from the warm-tinted lights and look gray in renders.
+  # Glossy dark material for the table. specular + shininess give tight
+  # highlights from the warm lights; reflectance gives a true mirror
+  # reflection (MuJoCo only reflects off planes and box +z faces, so the
+  # table_top box's upper surface picks it up). Lifted off near-black so the
+  # reflection is actually visible against the surface.
   spec.add_material(
     name="table_mat",
-    rgba=(0.05, 0.05, 0.05, 1.0),  # near-black, fully opaque
-    specular=0.0,
-    shininess=0.0,
-    reflectance=0.0,
+    rgba=(0.12, 0.12, 0.13, 1.0),  # dark gray, opaque
+    specular=0.7,
+    shininess=0.8,
+    reflectance=1.0,
   )
   body = spec.worldbody.add_body(name="table")
   body.add_geom(
@@ -295,8 +303,8 @@ def _make_table_spec() -> mujoco.MjSpec:
   light_z = _ceiling_z - 0.10  # 10 cm below the ceiling so they always reach the workspace
   for name, lpos, ldir in (
     ("table_light_overhead",  (-0.40,  0.00, light_z), (0.0,  0.0, -1.0)),
-    ("table_light_front",     (-0.40, +0.40, light_z), (0.0, -0.4, -1.0)),
-    ("table_light_back",      (-0.40, -0.40, light_z), (0.0, +0.4, -1.0)),
+    ("table_light_front",     (-0.60,  0.00, light_z), (0.0, -0.4, -1.0)),
+    ("table_light_back",      (-0.20,  0.00, light_z), (0.0, +0.4, -1.0)),
   ):
     body.add_light(
       name=name, pos=lpos, dir=ldir,
@@ -312,6 +320,16 @@ def _make_table_spec() -> mujoco.MjSpec:
       # Warm baseline ambient so shadowed faces don't fall to black
       # when only one light fires.
       ambient=(0.25, 0.20, 0.10),
+    )
+    # Visualization-only marker so the light positions are visible in the
+    # viewer. Sites have no collision (they're never in contype/conaffinity)
+    # and aren't seen by any sensor, so this is purely cosmetic.
+    body.add_site(
+      name=f"{name}_marker",
+      pos=lpos,
+      type=mujoco.mjtGeom.mjGEOM_SPHERE,
+      size=(0.02, 0.0, 0.0),
+      rgba=(1.0, 0.85, 0.4, 0.8),  # warm yellow, matches the bulb tint
     )
   return spec
 

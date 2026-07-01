@@ -210,6 +210,90 @@ uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb \
     --agent.logger tensorboard
 ```
 
+### DR curriculum (DR0 → DR1 → DR2 → DR3) — recommended
+
+Grasping a 2 cm block is a fragile exploration bottleneck. Training with full
+domain randomization from scratch tips the policy into a reach-only optimum and
+it never learns to lift — and adding too much at once *after* the grasp is
+learned collapses it at the resume boundary just the same (observed twice: lift
+0.38→0.00, never recovers). So **ramp DR in four levels, one kind of change per
+step**, each a task id sharing `experiment_name` (`so101_block_picking_vision`)
+so every resume finds the prior run with no checkpoint copying. Each level sets
+`run_name`, so its run dir is tagged `<timestamp>_dr0…_dr3`:
+
+Only **visual** DR is ramped (vision-based grasping is the fragile part); the
+**non-visual** DR (servo lag, encoder bias, wide ±0.3 arm starts) is on from DR0
+since it doesn't corrupt the camera image. Cumulative — each level is a superset
+of the previous:
+
+| level | task id | adds (on top of previous) |
+|---|---|---|
+| DR0 | `…-Rgb-DR0` | **servo lag + encoder bias + wide ±0.3 arm starts** (non-visual); vivid-pink block, sharp images, fixed cameras |
+| DR1 | `…-Rgb-DR1` | block color (pink↔salmon) + table-color noise |
+| DR2 | `…-Rgb-DR2` | **image motion blur + pixel noise + brightness/contrast + specular glare + cast shadows + camera & proprioception latency** + **camera-pose jitter @ ½** (±2.5°/±1.5 cm) |
+| DR3 | `…-Rgb-DR3` (= bare `…-Rgb`) | **camera-pose jitter @ full** (±5°/±3 cm; ramped ½→full across DR2–DR3) |
+
+Per-factor matrix (✓ = active at that level):
+
+| factor | DR0 | DR1 | DR2 | DR3 |
+|---|:--:|:--:|:--:|:--:|
+| servo lag (per-joint low-pass + transport delay) | ✓ | ✓ | ✓ | ✓ |
+| encoder bias | ✓ | ✓ | ✓ | ✓ |
+| wide arm start range (±0.3) | ✓ | ✓ | ✓ | ✓ |
+| block/table color | ✗ | ✓ | ✓ | ✓ |
+| image blur + pixel noise + brightness/contrast | ✗ | ✗ | ✓ | ✓ |
+| specular glare (faked) + cast shadows | ✗ | ✗ | ✓ | ✓ |
+| camera + proprioception obs latency | ✗ | ✗ | ✓ | ✓ |
+| camera-pose (extrinsics) jitter | ✗ | ✗ | ½ | full |
+| anti-collapse PPO hyperparams (resume task) | — | ✗ | ✓ | ✓ |
+| run-dir tag (`run_name`) | `_dr0` | `_dr1` | `_dr2` | `_dr3` |
+
+Always-on start randomization (every level, including DR0): block & container XY
+(block x∈[-0.55,-0.30], y∈[-0.045,0.195]; container x∈[-0.45,-0.30],
+y∈[-0.245,-0.005]) with a **p=0.5 block↔container swap**, the **gripper start
+opening across its full range** (closed↔open), and light on/off randomization.
+
+None of the realism factors change the exported `.jit` contract (`action_scale`/
+`target_ref`/`max_relative_target`/`control_dt`), only pixel content and sim
+dynamics — so deploy/export are unchanged. Tune ranges in `block_picking_vision.py`
+(`aug_params` incl. `glare_prob`/`glare_intensity`, `cam_lag`, `use_shadows`),
+`block_picking.py` (`randomize_actuator_lag` `alpha_range`/`lag_range`,
+`BLOCK_XY_RANGE`/`CONTAINER_XY_RANGE`, swap `p`).
+
+```bash
+# DR0 — learn the grasp with non-visual DR (servo lag, encoder bias, wide starts)
+# but a clean camera. Fresh train. Watch Episode_Reward/lift climb off ~0.
+pixi run train-mjlab-vision-dr0                                   # ~16000 iters → ..._dr0
+
+# DR1 — + block/table COLOR only (cameras still fixed). Tiny dip expected.
+RUN=<dr0_run> CKPT=model_15000.pt pixi run train-mjlab-vision-dr1-resume
+
+# DR2 — + IMAGE realism (blur/noise/brightness + obs latency) + camera-pose
+# jitter @ ½. Lower-LR resume (camera jitter collapses the grasp under default LR).
+RUN=<dr1_run> CKPT=model_<N>.pt pixi run train-mjlab-vision-dr2-resume
+
+# DR3 — + camera-pose jitter @ full (ramped ½→full). Same lower-LR bundle.
+# Override knobs: LR=1e-4 KL=0.005 ENT=0.03 GN=0.5 RUN=… CKPT=… pixi run …-dr3-resume
+RUN=<dr2_run> CKPT=model_<N>.pt pixi run train-mjlab-vision-dr3-resume
+```
+
+At each resume watch `Episode_Reward/lift`/`success`. Two distinct failure modes:
+
+- **Drops to ~0 immediately at the boundary and re-climbs only `reach`** → that
+  level's *shock* is too large; shrink its ranges (e.g. DR2 image: blur 2.0→1.0,
+  drop camera latency in `block_picking_vision.py`) before going on.
+- **Holds a healthy plateau for thousands of iters then collapses to ~0 in
+  ~50 iters and never recovers** → that's a destructive PPO update, not a DR
+  shock. Lower the LR / KL further (`LR=1e-4 KL=0.005`), raise entropy
+  (`ENT=0.03`), and resume from the last pre-collapse checkpoint. Narrowing the
+  full-DR ranges (e.g. start `±0.2`, smaller camera jitter) also cuts the return
+  variance that triggers it.
+
+> The bare `Mjlab-SO101-Block-Picking-Rgb` (and state-only
+> `Mjlab-SO101-Block-Picking`) is the full-DR (= DR3) task, kept as the default
+> id for standalone tooling (export, deploy, play-zero, render). Each family also
+> has explicit `-DR0` / `-DR1` / `-DR2` / `-DR3` ids.
+
 ### Replay a trained vision policy
 
 ```bash
