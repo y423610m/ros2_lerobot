@@ -153,12 +153,16 @@ class PolicyNode(Node):
             self._max_rel = np.asarray(meta['max_relative_target'], dtype=np.float32)
             if meta.get('control_dt'):
                 trained_hz = 1.0 / float(meta['control_dt'])
+            # Action chunking: policy emits chunk_size*n actions per inference,
+            # streamed one per control step (1 = closed-loop, infer every step).
+            self._chunk = int(meta.get('chunk_size', 1))
             self.get_logger().info(f'loaded control contract from .jit metadata: {meta}')
         else:
             self._joint_names = SO101_JOINT_NAMES
             self._target_ref = _by_joint_order(HOME_JOINT_POS)
             self._action_scale = _by_joint_order(ACTION_SCALE)
             self._max_rel = _by_joint_order(MAX_RELATIVE_TARGET)
+            self._chunk = 1
             self.get_logger().warn(
                 'no metadata embedded in .jit; using built-in constants '
                 '(re-export with scripts/export_to_jit.py to embed the contract)'
@@ -191,6 +195,9 @@ class PolicyNode(Node):
         self._latest_wrist: Optional[np.ndarray] = None
         self._latest_top: Optional[np.ndarray] = None
         self._last_action = np.zeros(len(self._joint_names), dtype=np.float32)
+        # Action-chunk buffer: filled by one inference (chunk_size actions), then
+        # popped one per control tick; re-inferred when empty.
+        self._action_buf: list[np.ndarray] = []
 
         # Inference-rate measurement (logged ~1 Hz once the policy is running).
         self._rate_window_start: Optional[float] = None
@@ -247,8 +254,11 @@ class PolicyNode(Node):
     # ---- Control loop -----------------------------------------------------
 
     def _run_policy(self, joint_pos: np.ndarray) -> Optional[np.ndarray]:
-        """Forward the policy on the current obs; returns the (6,) raw action,
-        or None if no policy is loaded / camera frames haven't arrived yet."""
+        """Forward the policy on the current obs; returns the flat raw action
+        vector — ``(n,)`` closed-loop, or ``(chunk_size*n,)`` when chunking — or
+        None if no policy is loaded / camera frames haven't arrived yet. The obs
+        (joint_pos_rel + last_action + cameras) is identical either way; only the
+        output width changes with chunk_size."""
         if self._policy is None or self._latest_wrist is None or self._latest_top is None:
             return None
         joint_pos_rel = joint_pos - self._target_ref  # mirrors mdp_obs.joint_pos_rel
@@ -257,7 +267,7 @@ class PolicyNode(Node):
         state_t = torch.from_numpy(state_obs).to(self._device).unsqueeze(0)        # (1, 12)
         cam_t = torch.from_numpy(cam_obs).to(self._device).unsqueeze(0)            # (1, 6, 64, 64)
         with torch.inference_mode():
-            return self._policy(state_t, [cam_t]).squeeze(0).cpu().numpy()         # (6,)
+            return self._policy(state_t, [cam_t]).squeeze(0).cpu().numpy()         # (n,) or (chunk*n,)
 
     def _on_timer(self) -> None:
         if self._latest_joint_pos is None:
@@ -271,18 +281,25 @@ class PolicyNode(Node):
         if self._latest_wrist is None or self._latest_top is None:
             return  # warm-up: wait for the first camera frames
 
-        t0 = time.perf_counter()
-        raw = self._run_policy(joint_pos)
-        infer_dt = time.perf_counter() - t0
+        # Refill the chunk buffer when empty: one inference yields chunk_size
+        # actions (chunk_size=1 => infer every tick, i.e. closed-loop). Each tick
+        # streams the next action at the full control rate.
+        if not self._action_buf:
+            t0 = time.perf_counter()
+            raw_flat = self._run_policy(joint_pos)
+            infer_dt = time.perf_counter() - t0
+            if raw_flat is None:
+                return
+            chunk = np.asarray(raw_flat, dtype=np.float32).reshape(self._chunk, -1)  # (chunk, n)
+            self._action_buf = [chunk[i] for i in range(self._chunk)]
+            self._report_rate(infer_dt)
 
+        raw = self._action_buf.pop(0)
         target = self._target_ref + self._action_scale * raw
-        lo = joint_pos - self._max_rel
-        hi = joint_pos + self._max_rel
-        target = np.clip(target, lo, hi)
+        target = np.clip(target, joint_pos - self._max_rel, joint_pos + self._max_rel)
 
         self._publish_target(target)
         self._last_action = raw.astype(np.float32)
-        self._report_rate(infer_dt)
 
     def _report_rate(self, infer_dt: float) -> None:
         """Log the achieved inference rate (loop Hz) and mean inference compute

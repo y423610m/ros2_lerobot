@@ -24,8 +24,9 @@ import tyro
 
 import mjlab_rl  # noqa: F401  (registers tasks)
 from mjlab.envs import ManagerBasedRlEnv
-from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
+from mjlab.rl import MjlabOnPolicyRunner
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
+from mjlab_rl.envs.chunked_env import ChunkedVecEnvWrapper
 
 # Name of the action term to read the control contract off of (see the
 # ``actions`` dict in mjlab_rl/tasks/block_picking.py).
@@ -48,11 +49,15 @@ def _per_joint(value, n: int) -> list[float]:
   return [float(value)] * n
 
 
-def _build_metadata(base_env: ManagerBasedRlEnv) -> dict:
+def _build_metadata(base_env: ManagerBasedRlEnv, chunk_size: int = 1) -> dict:
   """The deployment contract, read off the live action term so it exactly
   matches training: target = target_ref + action_scale * action, then clamped to
   present ± max_relative_target. Embedded in the .jit so the deployment node
-  doesn't have to hardcode (and hand-sync) any of it."""
+  doesn't have to hardcode (and hand-sync) any of it.
+
+  ``chunk_size`` is the number of action steps the actor emits per inference
+  (1 = closed-loop). The deploy node reshapes the (1, chunk_size*n) output into a
+  chunk of ``chunk_size`` n-dim actions and streams them one per control step."""
   act = base_env.action_manager.get_term(ACTION_TERM)
   names = list(act._target_names)
   n = len(names)
@@ -63,6 +68,7 @@ def _build_metadata(base_env: ManagerBasedRlEnv) -> dict:
     "max_relative_target": _per_joint(act._max_rel, n),
     "control_dt": float(base_env.step_dt),  # 0.02 s -> 50 Hz
     "camera_hw": [64, 64],
+    "chunk_size": int(chunk_size),
   }
 
 
@@ -79,7 +85,10 @@ def run(task_id: str, cfg: ExportConfig) -> None:
   agent_cfg = load_rl_cfg(task_id)
 
   base_env = ManagerBasedRlEnv(cfg=env_cfg, device=cfg.device)
-  env = RslRlVecEnvWrapper(base_env, clip_actions=agent_cfg.clip_actions)
+  # ChunkedVecEnvWrapper reads CHUNK_SIZE from the env: with CHUNK_SIZE>1 the actor
+  # head is sized to chunk_size*n so a chunked checkpoint loads. Run export with the
+  # SAME CHUNK_SIZE used for training.
+  env = ChunkedVecEnvWrapper(base_env, clip_actions=agent_cfg.clip_actions)
   runner_cls = load_runner_cls(task_id) or MjlabOnPolicyRunner
   runner = runner_cls(env, asdict(agent_cfg), device=cfg.device)
   runner.load(str(ckpt), load_cfg={"actor": True}, strict=True, map_location=cfg.device)
@@ -90,7 +99,8 @@ def run(task_id: str, cfg: ExportConfig) -> None:
 
   # Embed the deployment contract inside the .jit (single file). The base
   # rsl-rl export saves without _extra_files, so re-load and re-save with it.
-  metadata = _build_metadata(base_env)
+  chunk_size = env.num_actions // base_env.action_manager.total_action_dim
+  metadata = _build_metadata(base_env, chunk_size=chunk_size)
   module = torch.jit.load(str(jit_path), map_location="cpu")
   module.save(str(jit_path), _extra_files={"metadata.json": json.dumps(metadata, indent=2)})
   print(f"[export_to_jit] embedded metadata: {metadata}")
