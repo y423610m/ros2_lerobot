@@ -49,6 +49,16 @@ play-mjlab-zero = "cd $PIXI_PROJECT_ROOT/mjlab_rl && uv run python scripts/play.
 # ----- Vision variant (Mjlab-SO101-Block-Picking-Rgb) -----
 # Train from scratch with the wrist + top-down camera setup.
 train-mjlab-vision = "cd $PIXI_PROJECT_ROOT/mjlab_rl && bash -c 'uv run python scripts/train.py Mjlab-SO101-Block-Picking-Rgb --env.scene.num-envs ${NENV:-1024} --agent.max-iterations ${ITER:-10000} --agent.logger tensorboard'"
+# ACTION-CHUNK CURRICULUM (overlay on the DR curriculum below): grow the open-loop
+# horizon with the DR level so the grasp is discovered near-closed-loop, then made
+# robust to the 1 s (chunk=50) deploy horizon. Prefix CHUNK_SIZE per stage; the
+# vision runner (WarmStartOnPolicyRunner) prefix-extends the actor head on each
+# resume (keeps CNN backbone + trunk + critic, re-learns only the head tail):
+#   pixi run train-mjlab-vision-dr0                                     # chunk=1 (closed-loop)
+#   CHUNK_SIZE=10 pixi run train-mjlab-vision-dr1-resume RUN=<dr0_run>
+#   CHUNK_SIZE=25 pixi run train-mjlab-vision-dr2-resume RUN=<dr1_run>
+#   CHUNK_SIZE=50 pixi run train-mjlab-vision-dr3-resume RUN=<dr2_run>  # = deploy horizon
+# (Omit CHUNK_SIZE everywhere for the closed-loop curriculum; it defaults to 1.)
 # DR curriculum DR0: learn the grasp with non-visual DR only (servo lag, encoder
 # bias, wide ±0.3 arm starts) but a clean camera (vivid-pink block, sharp images,
 # fixed cameras). Run dir tagged ..._dr0.

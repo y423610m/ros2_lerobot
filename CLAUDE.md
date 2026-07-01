@@ -60,3 +60,22 @@ Temporary diagnostics removed from `policy_node.py` after use (`zero_action`,
 `dump_images`, joint/image logging). Standalone diagnostic scripts
 `mjlab_rl/scripts/_check_actions.py` (action magnitude + reward in sim) and
 `_check_jit.py` (.jit-vs-checkpoint equivalence) may still be present — throwaway.
+
+## Action chunking + chunk-size curriculum (branch `20260701_actionChuck`)
+
+Action chunking: the actor emits `CHUNK_SIZE` future actions per inference, executed
+open-loop (`ChunkedVecEnvWrapper`, `mjlab_rl/envs/chunked_env.py`; env var `CHUNK_SIZE`,
+default 1 = the original closed-loop path). Interior chunk steps skip `sim.sense`+obs
+(render only the boundary frame); the `.jit` metadata carries `chunk_size` and the ROS
+node streams the chunk at 50 Hz. Deploy horizon = chunk=50 (1 s).
+
+Chunk-size **curriculum** (grows the open-loop horizon with the DR level so the grasp is
+learned near-closed-loop, then made robust — cheap early iters too, since collection
+scales ~linearly with chunk): `dr0=1 → dr1=10 → dr2=25 → dr3=50` (see the pixi comment
+block above the vision tasks for exact commands). Because chunk changes the actor's
+output-head size, resume can't be a strict load — the vision `runner_cls` is
+`WarmStartOnPolicyRunner` (`mjlab_rl/envs/warmstart_runner.py`): on a head-shape change it
+transfers the CNN backbone + trunk + critic verbatim and **prefix-extends** the head/std
+(the head is action-major, so the first `old_chunk*6` rows are actions `0..old_chunk-1` —
+copied; the tail is fresh-init), resets the optimizer, and starts at iteration 0.
+Same-chunk resume (and export) sees no mismatch and delegates to the base loader.

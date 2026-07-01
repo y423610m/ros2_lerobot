@@ -34,10 +34,10 @@ from mjlab.rl import (
   RslRlPpoAlgorithmCfg,
 )
 from mjlab.sensor import CameraSensorCfg
-from mjlab.tasks.manipulation.rl import ManipulationOnPolicyRunner
 from mjlab.tasks.registry import register_mjlab_task
 
 from mjlab_rl.envs import mdp as task_mdp
+from mjlab_rl.envs.warmstart_runner import WarmStartOnPolicyRunner
 from mjlab_rl.tasks.block_picking import (
   DR_ORDER,
   make_block_picking_env_cfg,
@@ -321,5 +321,8 @@ for _task_id, _lvl in _BLOCK_PICKING_RGB_LEVELS.items():
     env_cfg=make_block_picking_vision_env_cfg(dr_level=_lvl),
     play_env_cfg=make_block_picking_vision_env_cfg(play=True, dr_level=_lvl),
     rl_cfg=make_block_picking_vision_ppo_cfg(run_name=_lvl),
-    runner_cls=ManipulationOnPolicyRunner,
+    # WarmStartOnPolicyRunner == ManipulationOnPolicyRunner for same-chunk resume;
+    # on a chunk-size change (dr0=1→dr1=10→dr2=25→dr3=50) it prefix-extends the
+    # actor head instead of failing the strict load. See warmstart_runner.py.
+    runner_cls=WarmStartOnPolicyRunner,
   )
