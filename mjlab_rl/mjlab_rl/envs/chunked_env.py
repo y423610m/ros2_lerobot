@@ -62,6 +62,23 @@ class ChunkedVecEnvWrapper(RslRlVecEnvWrapper):
     b = actions.shape[0]
     sub = actions.view(b, self._chunk, self._base_action_dim)
 
+    # Render only the chunk-boundary frame. The policy consumes obs once per
+    # chunk, so rendering the 49 interior frames is wasted work — and for a
+    # vision task the camera render (sim.sense) dominates rollout time. sim.sense
+    # does BVH refit + camera render + raycast; rewards/terminations run earlier
+    # off privileged state + contact sensors (updated in sim.step, NOT
+    # sim.sense), so skipping it on interior steps leaves the RL signal
+    # unchanged. Physics still runs all N steps.
+    env = self.unwrapped
+    real_sense = env.sim.sense
+    real_compute = env.observation_manager.compute
+
+    def _skip_sense(*a, **k):
+      return None
+
+    def _skip_compute(*a, **k):
+      return env.obs_buf  # stale obs; discarded on interior steps anyway
+
     total_rew = torch.zeros(b, device=self.device)
     any_term = torch.zeros(b, dtype=torch.bool, device=self.device)
     any_trunc = torch.zeros(b, dtype=torch.bool, device=self.device)
@@ -69,18 +86,26 @@ class ChunkedVecEnvWrapper(RslRlVecEnvWrapper):
 
     obs_dict: dict = {}
     extras: dict = {}
-    for k in range(self._chunk):
-      a = sub[:, k]
-      if not bool(active.all()):
-        # freeze done envs to zero action (=> home-ward target) to keep the
-        # bleed into their auto-reset episode benign.
-        a = a.clone()
-        a[~active] = 0.0
-      obs_dict, rew, terminated, truncated, extras = self.env.step(a)
-      total_rew = total_rew + rew * active.to(rew.dtype)
-      any_term = any_term | (terminated & active)
-      any_trunc = any_trunc | (truncated & active)
-      active = active & ~(terminated | truncated)
+    try:
+      for k in range(self._chunk):
+        last = k == self._chunk - 1
+        # interior steps: skip camera render + obs compute; render only the last.
+        env.sim.sense = real_sense if last else _skip_sense
+        env.observation_manager.compute = real_compute if last else _skip_compute
+        a = sub[:, k]
+        if not bool(active.all()):
+          # freeze done envs to zero action (=> home-ward target) to keep the
+          # bleed into their auto-reset episode benign.
+          a = a.clone()
+          a[~active] = 0.0
+        obs_dict, rew, terminated, truncated, extras = self.env.step(a)
+        total_rew = total_rew + rew * active.to(rew.dtype)
+        any_term = any_term | (terminated & active)
+        any_trunc = any_trunc | (truncated & active)
+        active = active & ~(terminated | truncated)
+    finally:
+      env.sim.sense = real_sense
+      env.observation_manager.compute = real_compute
 
     dones = (any_term | any_trunc).to(dtype=torch.long)
     if not self.cfg.is_finite_horizon:
