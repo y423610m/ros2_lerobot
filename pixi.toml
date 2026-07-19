@@ -96,6 +96,18 @@ play-mjlab-vision-zero = "cd $PIXI_PROJECT_ROOT/mjlab_rl && uv run python script
 play-mjlab-vision-zero-print-camera = "cd $PIXI_PROJECT_ROOT/mjlab_rl && uv run python scripts/play_print_camera.py Mjlab-SO101-Block-Picking-Rgb --viewer viser --agent zero --num-envs 1 --no-terminations True"
 # Headless snapshot of both cameras → wrist_cam.png + top_cam.png in CWD.
 render-mjlab-cameras = "cd $PIXI_PROJECT_ROOT/mjlab_rl && uv run python scripts/render_cameras.py"
+# Distill a GOOD closed-loop (chunk=1) policy into a chunk=50 student via behavior
+# cloning (from-scratch chunk RL can't explore the 1 s blind commit). The student
+# exports/deploys like any chunked ckpt. Set TEACHER=<closed-loop model_*.pt>. Start
+# on -DR0 to check it reaches, then re-run with --task-id ...-DR3 for the deploy ckpt.
+#   TEACHER=logs/.../2026-06-29_22-45-05_dr3/model_81999.pt pixi run distill-mjlab-vision
+# Override iters (gradient updates, default 2000000) with ITER, e.g. ITER=2000000 pixi run ...
+# Continue a stopped distill run: RESUME=<distill model_*.pt> (restores student weights +
+# optimizer state, keeps the iteration numbering; ITER = ADDITIONAL updates to run).
+# DAGGER=1: student-driven rollouts with teacher relabeling (fixes BC covariate shift;
+# use together with RESUME=<trained BC ckpt>).
+# Progress -> TensorBoard: tensorboard --logdir logs/rsl_rl/so101_block_picking_vision
+distill-mjlab-vision = "cd $PIXI_PROJECT_ROOT/mjlab_rl && bash -c 'uv run python scripts/distill_chunk.py --teacher-checkpoint ${TEACHER:?set TEACHER=path/to/closed-loop/model.pt} --task-id ${TASK:-Mjlab-SO101-Block-Picking-Rgb-DR3} --num-envs ${NENV:-1024} --chunk-size ${CHUNK:-50} --iters ${ITER:-2000000} ${RESUME:+--resume-checkpoint ${RESUME}} ${DAGGER:+--dagger}'"
 
 [activation]
 scripts = ["install/setup.sh"]

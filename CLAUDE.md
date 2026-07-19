@@ -79,3 +79,37 @@ transfers the CNN backbone + trunk + critic verbatim and **prefix-extends** the 
 (the head is action-major, so the first `old_chunk*6` rows are actions `0..old_chunk-1` —
 copied; the tail is fresh-init), resets the optimizer, and starts at iteration 0.
 Same-chunk resume (and export) sees no mismatch and delegates to the base loader.
+
+## Chunk policy via distillation (preferred over from-scratch chunk RL)
+
+From-scratch chunk RL (incl. the chunk-size curriculum) failed to even *reach* the object —
+a blind 1 s open-loop commit under sparse reward is an exploration dead-end. If a GOOD
+**closed-loop** (chunk=1) policy exists, distill it instead: `scripts/distill_chunk.py`
+(pixi `distill-mjlab-vision`, `TEACHER=<closed-loop model_*.pt>`). Behavior cloning (ACT
+recipe): roll the teacher out in sim (a perfectly queryable expert), form non-overlapping
+`(boundary_obs → next-50 teacher raw actions)` windows aligned to episode reset (= the
+student's deploy inference points), regress the chunk=50 student head to them with smooth-L1.
+Reuses: `ChunkedVecEnvWrapper` (sizes the 300-dim student head), `WarmStartOnPolicyRunner.load`
+(warm-starts the student = teacher backbone/trunk/**obs_normalizer** + head prefix), and a
+bare 6-dim `SpatialSoftmaxCNNModel` as the frozen teacher (no 2nd env/VRAM). Output is a
+standard ckpt → `export_to_jit.py` stamps `chunk_size=50` unchanged → ROS node unchanged.
+Start on `-DR0` to confirm it reaches/grasps, then re-distill on `-DR3` for the deploy ckpt.
+Teacher raw actions are large (gripper ~300) → use L1/smooth-L1, never MSE. Known limit:
+open-loop can't reproduce the teacher's sub-second feedback, so BC may plateau below teacher
+success — `--dagger` (student-driven rollout, teacher relabels visited states) is the fix.
+
+Findings + knobs from the chunk=50/chunk=10 distill runs (2026-07):
+- **chunk=50 hits an information floor** (student fits action 0 well, actions ~25-49 are
+  unpredictable from the boundary frame; eval success ~25% of teacher). **chunk=10 works**:
+  BC ≈ 0.47 vs teacher 1.95 `Episode_Reward/success`; + DAgger deployed on the real arm at
+  5 Hz inference (node reads `chunk_size` from the .jit; rebuild colcon after node changes!).
+- Pixi knobs: `RESUME=<distill model_*.pt>` continues a run (weights + Adam state, iteration
+  numbering; `ITER` = additional updates), `DAGGER=1` toggles `--dagger`.
+- Eval is a fixed `eval_steps=1200` **control-step** horizon (≥3 episodes). A chunk-count
+  horizon shorter than one episode logs only early-failure episodes → success reads ~0
+  (bit us at chunk=10). `ChunkedVecEnvWrapper` also merges interior sub-step `extras["log"]`
+  so mid-chunk episode ends aren't dropped.
+- Distill run dirs are date-first: `<teacher_run>/<stamp>_distill_chunk<N>/`.
+- `scripts/play.py` streams a chunk one action per viewer tick (deploy semantics, smooth
+  viewer); `ChunkedVecEnvWrapper.step` passes a base-dim (6) action through as one control
+  step for this.

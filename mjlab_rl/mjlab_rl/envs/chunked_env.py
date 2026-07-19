@@ -55,6 +55,12 @@ class ChunkedVecEnvWrapper(RslRlVecEnvWrapper):
   def step(self, actions: torch.Tensor):
     if self._chunk <= 1:
       return super().step(actions)
+    if actions.shape[-1] == self._base_action_dim:
+      # Single sub-action passthrough (chunk streamed one action per step, as the
+      # deploy node does). Used by the play viewer so every control step is
+      # rendered instead of the whole chunk executing inside one call. Training
+      # always sends the full chunk*base action and never takes this branch.
+      return super().step(actions)
 
     if self.clip_actions is not None:
       actions = torch.clamp(actions, -self.clip_actions, self.clip_actions)
@@ -86,6 +92,7 @@ class ChunkedVecEnvWrapper(RslRlVecEnvWrapper):
 
     obs_dict: dict = {}
     extras: dict = {}
+    sub_logs: list[dict] = []  # episode stats from every sub-step, not just the last
     try:
       for k in range(self._chunk):
         last = k == self._chunk - 1
@@ -99,6 +106,9 @@ class ChunkedVecEnvWrapper(RslRlVecEnvWrapper):
           a = a.clone()
           a[~active] = 0.0
         obs_dict, rew, terminated, truncated, extras = self.env.step(a)
+        lg = extras.get("log")
+        if lg:
+          sub_logs.append(lg)
         total_rew = total_rew + rew * active.to(rew.dtype)
         any_term = any_term | (terminated & active)
         any_trunc = any_trunc | (truncated & active)
@@ -106,6 +116,18 @@ class ChunkedVecEnvWrapper(RslRlVecEnvWrapper):
     finally:
       env.sim.sense = real_sense
       env.observation_manager.compute = real_compute
+
+    # Episodes ending on interior sub-steps emit their Episode_Reward/* stats in
+    # that sub-step's extras["log"], which the boundary extras would silently drop
+    # — biasing any consumer (rsl-rl logger, distill eval) toward whichever
+    # episodes happen to end on the boundary. Merge all sub-step logs (unweighted
+    # mean per key — approximate, but unbiased vs. dropping them).
+    if sub_logs:
+      merged: dict = {}
+      for d in sub_logs:
+        for key, v in d.items():
+          merged.setdefault(key, []).append(v)
+      extras["log"] = {key: sum(vs) / len(vs) for key, vs in merged.items()}
 
     dones = (any_term | any_trunc).to(dtype=torch.long)
     if not self.cfg.is_finite_horizon:
